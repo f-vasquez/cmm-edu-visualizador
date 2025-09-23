@@ -1,0 +1,11 @@
+streamlit==1.32.0
+pandas==2.2.0
+numpy==1.26.4
+plotly==5.18.0
+scikit-learn==1.4.0
+umap-learn==0.5.5
+numba==0.59.0
+pynndescent==0.5.11
+openai==1.35.0
+python-dotenv==1.0.0
+faiss-cpu==1.11.0 
