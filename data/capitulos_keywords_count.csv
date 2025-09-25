@@ -1,0 +1,100 @@
+id,curso,numero,titulo,num_keywords
+2,Primero Básico,1,Números hasta 10,72
+3,Primero Básico,2,Componer y descomponer números hasta 10,36
+4,Primero Básico,3,Números ordinales,11
+5,Primero Básico,4,Adiciones hasta 10,179
+6,Primero Básico,5,Sustracciones hasta 10,165
+8,Primero Básico,6,Formas,26
+9,Primero Básico,7,Números mayores a 10,114
+10,Primero Básico,8,Patrones,37
+11,Primero Básico,9,Espacio,21
+13,Primero Básico,10,Adiciones hasta 20,111
+14,Primero Básico,11,Sustracciones hasta 20,82
+15,Primero Básico,12,Problemas de adiciones y sustracciones,58
+17,Primero Básico,13,Datos y pictogramas,12
+18,Primero Básico,14,Comparando tamaños,78
+19,Primero Básico,15,Creando figuras,28
+21,Segundo Básico,1,Números hasta 100,210
+22,Segundo Básico,2,Pensando cómo calcular,96
+23,Segundo Básico,3,Adición en forma vertical,143
+24,Segundo Básico,4,Sustracción en forma vertical,87
+26,Segundo Básico,5,Longitud,167
+27,Segundo Básico,6,Tablas y gráficos,51
+28,Segundo Básico,7,Igualdad y desigualdad,14
+29,Segundo Básico,8,Adiciones y sustracciones,136
+31,Segundo Básico,9,Adiciones y sustracciones hasta 20,87
+32,Segundo Básico,10,Figuras geométricas,118
+33,Segundo Básico,11,Patrones,64
+35,Segundo Básico,12,Multiplicar,57
+36,Segundo Básico,13,Tablas de multiplicar,21
+37,Segundo Básico,14,Cuerpos,45
+39,Tercero Básico,1,Números hasta 1000,183
+40,Tercero Básico,2,Adición en forma vertical,118
+41,Tercero Básico,3,Sustracción en forma vertical,75
+42,Tercero Básico,4,Patrones numéricos,59
+44,Tercero Básico,5,Tiempo,84
+45,Tercero Básico,6,Tablas de multiplicar,51
+46,Tercero Básico,7,Multiplicación,47
+47,Tercero Básico,8,División,87
+49,Tercero Básico,9,Localización de objetos,39
+50,Tercero Básico,10,Figuras y cuerpos geométricos,52
+51,Tercero Básico,11,Perímetro,53
+52,Tercero Básico,12,Triángulos,87
+54,Tercero Básico,13,Representando datos,96
+55,Tercero Básico,14,Fracciones,56
+56,Tercero Básico,15,Masa,89
+58,Cuarto Básico,1,Números hasta 10000,26
+59,Cuarto Básico,2,Adiciones y sustracciones hasta 1000,122
+60,Cuarto Básico,3,Reglas de la multiplicación,85
+61,Cuarto Básico,4,Pensando cómo calcular,28
+62,Cuarto Básico,5,Longitud,97
+64,Cuarto Básico,6,Multiplicación,59
+65,Cuarto Básico,7,Tiempo,81
+66,Cuarto Básico,8,División,22
+67,Cuarto Básico,9,Área,88
+68,Cuarto Básico,10,Ángulos,123
+69,Cuarto Básico,11,Patrones,18
+71,Cuarto Básico,12,División,106
+72,Cuarto Básico,13,Volumen,45
+73,Cuarto Básico,14,Simetría,65
+74,Cuarto Básico,15,Números decimales,46
+75,Cuarto Básico,16,Datos,16
+78,Cuarto Básico,17,Fracciones,83
+79,Cuarto Básico,18,Ecuaciones e inecuaciones,56
+80,Cuarto Básico,19,Transformaciones isométricas,22
+81,Cuarto Básico,20,Azar,13
+82,Cuarto Básico,21,Vistas,1
+85,Quinto Básico,1,Números grandes,149
+86,Quinto Básico,2,Multiplicación,148
+87,Quinto Básico,3,Haciendo cintas,19
+88,Quinto Básico,4,Longitud,92
+89,Quinto Básico,5,División,63
+91,Quinto Básico,6,Números decimales,54
+92,Quinto Básico,7,Patrones,18
+93,Quinto Básico,8,Fracciones,104
+94,Quinto Básico,9,Datos,16
+96,Quinto Básico,10,Paralelismo y perpendicularidad en figuras y cuerpos geométricos,109
+97,Quinto Básico,11,Explorando posibilidades,84
+98,Quinto Básico,12,Operatoria combinada,146
+99,Quinto Básico,13,Media,38
+101,Quinto Básico,14,Congruencia,83
+102,Quinto Básico,15,Ecuaciones e inecuaciones,79
+103,Quinto Básico,16,Adición y sustracción de fracciones,66
+104,Quinto Básico,17,Área de cuadriláteros y triángulos,103
+106,Sexto Básico,1,Operatoria combinada,32
+107,Sexto Básico,2,Pensando cómo calcular,24
+108,Sexto Básico,3,Ángulos,216
+109,Sexto Básico,4,Multiplicación y división de decimales por un número natural,58
+110,Sexto Básico,5,Área de cubos y paralelepípedos,44
+112,Sexto Básico,6,Ángulos en triángulos y cuadríáteros,209
+113,Sexto Básico,7,Múltiplos y divisores,46
+114,Sexto Básico,8,Multiplicación de números decimales,58
+115,Sexto Básico,9,División de números decimales,86
+116,Sexto Básico,10,Volumen,77
+118,Sexto Básico,11,Fracciones y números mixtos,47
+119,Sexto Básico,12,Operatoria con números decimales y fracciones,75
+120,Sexto Básico,13,"Expresiones algebraicas, patrones y ecuaciones",79
+121,Sexto Básico,14,Razones,59
+123,Sexto Básico,15,Porcentajes,21
+124,Sexto Básico,16,Datos,20
+125,Sexto Básico,17,Experimentos aleatorios,27

@@ -13,6 +13,7 @@ from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
 import unicodedata
 import re
 import sys
+import io
 
 # Cargar variables de entorno
 load_dotenv()
@@ -1099,6 +1100,754 @@ def similarity_heatmaps_tab():
                 key="download_metrics"
             )
 
+# Extra tab with threshold slider
+def similarity_heatmaps_tab_with_threshold():
+    """Pestaña para heatmaps de similitud con umbral"""
+    st.markdown('<h1 class="main-header">🧱 Umbrales de Similitud</h1>', unsafe_allow_html=True)
+    
+    # Cargar datos
+    df = load_data()
+    if df is None:
+        st.error("No se pudieron cargar los datos. Verifica que el archivo CSV esté en la carpeta 'data/'.")
+        return
+    
+    # --- CONFIGURACIÓN DE SIMILITUD CON UMBRAL ---
+    st.subheader("Configuración de Similitud")
+    
+    # Primero crear 2 columnas para los selectores principales
+    col_sel1, col_sel2 = st.columns(2)
+    with col_sel1:
+        similarity_method = st.selectbox(
+            "Método de Similitud:",
+            ['cosine', 'euclidean', 'dot_product'],
+            format_func=lambda x: {
+                'cosine': 'Similitud Coseno',
+                'euclidean': 'Distancia Euclidiana',
+                'dot_product': 'Producto Punto'
+            }[x],
+            help="""
+            - **Coseno**: Similitud coseno sin normalización adicional (-1 a 1)
+            - **Euclidiana**: Distancia euclidiana directa (valores más altos = más distantes)
+            - **Producto Punto**: Producto punto directo sin normalización
+            """,
+            key="similarity_heatmaps_method_threshold_unique"
+        )
+    
+    cursos_disponibles = ['Todos'] + ordenar_cursos_personalizado(df['curso'].unique().tolist())
+    with col_sel2:
+        curso_seleccionado = st.selectbox(
+            "Filtrar por Curso:",
+            cursos_disponibles,
+            help="Filtrar matriz por curso específico",
+            key="sim_heatmaps_curso_threshold_unique"
+        )
+    
+    # Luego el umbral en una sección separada
+    st.subheader("Umbral de Similitud")
+    
+    # Control deslizante para el umbral de similitud
+    if similarity_method == 'euclidean':
+        # Para distancia euclidiana: menor valor = más similar
+        threshold = st.slider(
+            "Umbral de Distancia Máxima:",
+            min_value=0.0,
+            max_value=2.0,
+            value=1.0,
+            step=0.01,
+            help="Solo se mostrarán conexiones con distancia menor o igual a este valor (valores más bajos = más similares)",
+            key="threshold_slider_unique"
+        )
+    else:
+        # Para coseno y producto punto: mayor valor = más similar
+        threshold = st.slider(
+            "Umbral de Similitud Mínima:",
+            min_value=-1.0,
+            max_value=1.0,
+            value=0.5,
+            step=0.01,
+            help="Solo se mostrarán conexiones con similitud mayor o igual a este valor",
+            key="threshold_slider_unique"
+        )
+    
+    # Filtrar datos
+    df_filtrado = df.copy()
+    if curso_seleccionado != 'Todos':
+        df_filtrado = df[df['curso'] == curso_seleccionado]
+    
+    if len(df_filtrado) == 0:
+        st.warning("No hay datos para mostrar con los filtros seleccionados.")
+        return
+    
+    # Asegurar que trabajamos con capítulos únicos
+    df_unique = df_filtrado.drop_duplicates(subset=['id']).copy()
+    
+    # Crear identificador único de capítulo para todo el análisis de similitud
+    def capitulo_id(row):
+        # Ejemplo: '1B: Capítulo N°3: Suma y resta'
+        curso_abbr = str(row['curso']).replace('Primero', '1B').replace('Segundo', '2B').replace('Tercero', '3B').replace('Cuarto', '4B').replace('Quinto', '5B').replace('Sexto', '6B')
+        return f"{curso_abbr}: Capítulo N°{row['numero']}: {row['titulo']}"
+    
+    df_unique['capitulo_id'] = df_unique.apply(capitulo_id, axis=1)
+    labels = df_unique['capitulo_id'].tolist()
+
+    # Preparar datos usando capítulos únicos
+    embeddings_matrix = np.vstack(df_unique['embeddings_array'].values)
+    courses = df_unique['curso'].tolist()
+
+    # Mostrar información
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Capítulos Únicos Analizados", len(df_unique))
+    with col2:
+        st.metric("Dimensión Embeddings", embeddings_matrix.shape[1])
+    with col3:
+        st.metric("Método Seleccionado", {
+            'cosine': 'Coseno',
+            'euclidean': 'Euclidiana', 
+            'dot_product': 'Producto Punto'
+        }[similarity_method])
+    with col4:
+        if similarity_method == 'euclidean':
+            st.metric("Umbral Distancia", f"{threshold:.2f}")
+        else:
+            st.metric("Umbral Similitud", f"{threshold:.2f}")
+    
+    # Información adicional sobre los datos
+    if len(df_filtrado) != len(df_unique):
+        st.info(f"ℹ️ Se detectaron {len(df_filtrado)} filas totales, usando {len(df_unique)} capítulos únicos para el análisis.")
+    
+    # Calcular matriz de similitud
+    with st.spinner(f"Calculando matriz de similitud usando {similarity_method}..."):
+        similarity_matrix = calculate_similarity_matrix(embeddings_matrix, similarity_method)
+    
+    # --- NUEVA FUNCIONALIDAD: MATRIZ CON UMBRAL ---
+    st.subheader("🎯 Matriz de Adyacencia con Umbral")
+    
+    # Crear matriz binaria basada en el umbral
+    if similarity_method == 'euclidean':
+        # Para distancia: valores por debajo del umbral = similares (1), otros = 0
+        adjacency_matrix = (similarity_matrix <= threshold).astype(int)
+        # Excluir diagonal (autosimilitud)
+        np.fill_diagonal(adjacency_matrix, 0)
+    else:
+        # Para similitud: valores por encima del umbral = similares (1), otros = 0
+        adjacency_matrix = (similarity_matrix >= threshold).astype(int)
+        # Excluir diagonal (autosimilitud)
+        np.fill_diagonal(adjacency_matrix, 0)
+    
+    # Mostrar estadísticas de la matriz de adyacencia
+    total_possible_connections = len(similarity_matrix) * (len(similarity_matrix) - 1) / 2
+    actual_connections = np.sum(adjacency_matrix) / 2  # Dividir por 2 porque es simétrica
+    
+    col_adj1, col_adj2, col_adj3 = st.columns(3)
+    with col_adj1:
+        st.metric("Conexiones Identificadas", int(actual_connections))
+    with col_adj2:
+        percentage = (actual_connections / total_possible_connections * 100) if total_possible_connections > 0 else 0
+        st.metric("Porcentaje de Conexiones", f"{percentage:.1f}%")
+    with col_adj3:
+        densidad = actual_connections / total_possible_connections if total_possible_connections > 0 else 0
+        st.metric("Densidad de la Red", f"{densidad:.3f}")
+    
+    # Crear y mostrar heatmap de la matriz de adyacencia
+    try:
+        method_names = {
+            'cosine': 'Similitud Coseno',
+            'euclidean': 'Distancia Euclidiana',
+            'dot_product': 'Producto Punto'
+        }
+        
+        threshold_type = "mínima de similitud" if similarity_method != 'euclidean' else "máxima de distancia"
+        fig_adjacency = create_similarity_heatmap(
+            adjacency_matrix, 
+            labels, 
+            f"Matriz de Adyacencia ({method_names[similarity_method]}) - Umbral {threshold_type}: {threshold}",
+            'binary'  # Usar escala binaria para la matriz de adyacencia
+        )
+        
+        if fig_adjacency is not None:
+            st.plotly_chart(fig_adjacency, use_container_width=True)
+        else:
+            st.error("Error: create_similarity_heatmap devolvió None para la matriz de adyacencia")
+            
+    except Exception as e:
+        st.error(f"Error creando matriz de adyacencia: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+    
+    # --- NUEVA FUNCIONALIDAD: DESCARGAR MATRIZ DE ADYACENCIA ---
+    st.subheader("📥 Descargar Matriz de Adyacencia")
+    
+    # Crear DataFrame de la matriz de adyacencia
+    adj_df = pd.DataFrame(adjacency_matrix, index=labels, columns=labels)
+    
+    # Crear lista de conexiones para descarga
+    connections_list = []
+    for i in range(len(adjacency_matrix)):
+        for j in range(i+1, len(adjacency_matrix)):  # Solo la mitad superior para evitar duplicados
+            if adjacency_matrix[i, j] == 1:
+                connections_list.append({
+                    'curso_capitulo_1': courses[i],
+                    'capitulo_1': labels[i],
+                    'curso_capitulo_2': courses[j],
+                    'capitulo_2': labels[j],
+                    'similitud_original': similarity_matrix[i, j],
+                    'umbral_aplicado': threshold
+                })
+    
+    connections_df = pd.DataFrame(connections_list)
+    
+    col_download1, col_download2 = st.columns(2)
+    
+    with col_download1:
+        # Descargar matriz de adyacencia completa
+        if st.button("💾 Matriz de Adyacencia (CSV)", key="download_adj_btn_threshold_unique"):
+            csv_adj = adj_df.to_csv()
+            file_name_adj = f"matriz_adyacencia_{similarity_method}_umbral{threshold:.2f}_{safe_filename(curso_seleccionado)}.csv"
+            st.download_button(
+                label="Descargar Matriz CSV",
+                data=csv_adj,
+                file_name=file_name_adj,
+                mime="text/csv",
+                key="download_adj_matrix_threshold_unique"
+            )
+    
+    with col_download2:
+        # Descargar lista de conexiones
+        if st.button("📊 Lista de Conexiones (CSV)", key="download_conn_btn_threshold_unique"):
+            if not connections_list:
+                st.warning("No hay conexiones que cumplan con el umbral seleccionado.")
+            else:
+                csv_connections = connections_df.to_csv(index=False)
+                file_name_conn = f"conexiones_{similarity_method}_umbral{threshold:.2f}_{safe_filename(curso_seleccionado)}.csv"
+                st.download_button(
+                    label="Descargar Conexiones CSV",
+                    data=csv_connections,
+                    file_name=file_name_conn,
+                    mime="text/csv",
+                    key="download_connections_threshold_unique"
+                )
+    
+    
+    # Mostrar vista previa de las conexiones
+    if connections_list:
+        st.subheader("🔍 Vista Previa de Conexiones Identificadas")
+        st.write(f"**Se encontraron {len(connections_list)} conexiones con el umbral aplicado:**")
+        
+        # Mostrar las primeras 10 conexiones
+        display_connections = connections_df.head(10).copy()
+        if similarity_method == 'euclidean':
+            display_connections = display_connections.rename(columns={'similitud_original': 'distancia_original'})
+        
+        st.dataframe(display_connections, use_container_width=True)
+        
+
+        # --- NUEVO DATAFRAME: CONEXIONES AGRUPADAS POR CAPÍTULO ---
+        st.subheader("📋 Conexiones por Capítulo (Ordenadas por Similitud)")
+
+        # --- CARGAR CONTEOS DESDE CSV ---
+        keywords_df = pd.read_csv("data/capitulos_keywords_count.csv")
+
+        # Reconstruir capitulo_id para hacer match con connections_list
+        def capitulo_id(row):
+            curso_abbr = str(row['curso']).replace('Primero', '1B').replace('Segundo', '2B') \
+                                        .replace('Tercero', '3B').replace('Cuarto', '4B') \
+                                        .replace('Quinto', '5B').replace('Sexto', '6B')
+            return f"{curso_abbr}: Capítulo N°{row['numero']}: {row['titulo']}"
+
+        keywords_df['capitulo_id'] = keywords_df.apply(capitulo_id, axis=1)
+
+        # --- CONEXIONES POR CAPÍTULO ---
+        capitulo_conexiones = {}
+
+        for conn in connections_list:
+            cap1 = conn['capitulo_1']
+            cap2 = conn['capitulo_2']
+            curso1 = conn['curso_capitulo_1']
+            curso2 = conn['curso_capitulo_2']
+            similitud = conn['similitud_original']
+            
+            if cap1 not in capitulo_conexiones:
+                capitulo_conexiones[cap1] = {
+                    'curso': curso1,
+                    'capitulos_relacionados': [],
+                    'similitudes': []
+                }
+            capitulo_conexiones[cap1]['capitulos_relacionados'].append(cap2)
+            capitulo_conexiones[cap1]['similitudes'].append(similitud)
+            
+            if cap2 not in capitulo_conexiones:
+                capitulo_conexiones[cap2] = {
+                    'curso': curso2,
+                    'capitulos_relacionados': [],
+                    'similitudes': []
+                }
+            capitulo_conexiones[cap2]['capitulos_relacionados'].append(cap1)
+            capitulo_conexiones[cap2]['similitudes'].append(similitud)
+
+        # Ordenar conexiones
+        for cap, data in capitulo_conexiones.items():
+            combined = list(zip(data['capitulos_relacionados'], data['similitudes']))
+            if similarity_method == 'euclidean':
+                combined_sorted = sorted(combined, key=lambda x: x[1])
+            else:
+                combined_sorted = sorted(combined, key=lambda x: x[1], reverse=True)
+            data['capitulos_relacionados'] = [item[0] for item in combined_sorted]
+            data['similitudes'] = [item[1] for item in combined_sorted]
+
+        # Crear DataFrame final
+        conexiones_por_capitulo = []
+        for cap, data in capitulo_conexiones.items():
+            # Buscar keywords principal
+            keywords_principal = keywords_df.loc[
+                keywords_df['capitulo_id'] == cap, 'num_keywords'
+            ].values
+            keywords_principal = int(keywords_principal[0]) if len(keywords_principal) > 0 else 0
+
+            # Buscar keywords relacionados
+            keywords_relacionados = []
+            for cap_relacionado in data['capitulos_relacionados']:
+                kw = keywords_df.loc[
+                    keywords_df['capitulo_id'] == cap_relacionado, 'num_keywords'
+                ].values
+                keywords_relacionados.append(str(int(kw[0])) if len(kw) > 0 else "0")
+            
+            conexiones_por_capitulo.append({
+                'curso': data['curso'],
+                'capitulo': cap,
+                'keywords_principal': keywords_principal,
+                'capitulos_relacionados': ', '.join(data['capitulos_relacionados']),
+                'keywords_relacionados': ', '.join(keywords_relacionados),
+                'similitudes': ', '.join([f"{sim:.4f}" for sim in data['similitudes']])
+            })
+
+        df_conexiones_por_capitulo = pd.DataFrame(conexiones_por_capitulo)
+
+        # Mostrar
+        st.write("**Conexiones agrupadas por capítulo (ordenadas por similitud):**")
+        st.dataframe(df_conexiones_por_capitulo, use_container_width=True, height=400)
+
+        st.download_button(
+            label="📥 Descargar Conexiones por Capítulo (CSV)",
+            data=df_conexiones_por_capitulo.to_csv(index=False),
+            file_name=f"conexiones_por_capitulo_{similarity_method}_umbral{threshold:.2f}.csv",
+            mime="text/csv",
+            key="download_conexiones_por_capitulo"
+        )
+
+        
+        # --- ANÁLISIS ADICIONAL MEJORADO ---
+        st.subheader("📊 Análisis de las Conexiones")
+        
+        col_anal1, col_anal2 = st.columns(2)
+        
+        with col_anal1:
+            # Distribución de conexiones por curso - MEJORADO
+            if len(connections_list) > 0:
+                course_connections = []
+                for conn in connections_list:
+                    course_connections.extend([conn['curso_capitulo_1'], conn['curso_capitulo_2']])
+                
+                course_counts = pd.Series(course_connections).value_counts().reset_index()
+                course_counts.columns = ['Curso', 'Conexiones']
+                
+                fig_courses = px.bar(
+                    course_counts,
+                    x='Curso',
+                    y='Conexiones',
+                    title="📚 Distribución de Conexiones por Curso",
+                    labels={'Conexiones': 'Número de Conexiones', 'Curso': 'Curso'},
+                    color='Conexiones',
+                    color_continuous_scale='viridis',
+                    text='Conexiones'
+                )
+                
+                fig_courses.update_layout(
+                    xaxis_tickangle=45,
+                    plot_bgcolor='rgba(248,249,250,1)',
+                    paper_bgcolor='rgba(248,249,250,1)',
+                    font=dict(size=12, family='Arial'),
+                    title_font=dict(size=16, family='Arial', color='#2c3e50'),
+                    showlegend=False,
+                    height=400
+                )
+                
+                fig_courses.update_traces(
+                    textposition='outside',
+                    marker_line_color='black',
+                    marker_line_width=1,
+                    hovertemplate='<b>%{x}</b><br>Conexiones: %{y}<extra></extra>'
+                )
+                
+                fig_courses.update_xaxes(
+                    showgrid=False,
+                    linecolor='black',
+                    linewidth=1
+                )
+                
+                fig_courses.update_yaxes(
+                    showgrid=True,
+                    gridcolor='lightgray',
+                    linecolor='black',
+                    linewidth=1
+                )
+                
+                st.plotly_chart(fig_courses, use_container_width=True)
+        
+        with col_anal2:
+            # Histograma de valores de similitud/distancia - MEJORADO
+            if len(connections_list) > 0:
+                sim_values = [conn['similitud_original'] for conn in connections_list]
+                
+                fig_hist = px.histogram(
+                    x=sim_values,
+                    title=f"📊 Distribución de {'Distancias' if similarity_method == 'euclidean' else 'Similitudes'}",
+                    labels={'x': f"{'Distancia' if similarity_method == 'euclidean' else 'Similitud'}", 
+                        'y': 'Frecuencia'},
+                    nbins=20,
+                    color_discrete_sequence=['#1f77b4'],
+                    opacity=0.8,
+                    marginal="box"  # Agrega un box plot en el margen
+                )
+                
+                # Agregar línea vertical para el umbral
+                fig_hist.add_vline(
+                    x=threshold, 
+                    line_dash="dash", 
+                    line_color="red",
+                    line_width=3,
+                    annotation_text=f"Umbral: {threshold:.2f}",
+                    annotation_position="top right",
+                    annotation_font=dict(color="red", size=12)
+                )
+                
+                # Agregar línea de media
+                mean_val = np.mean(sim_values)
+                fig_hist.add_vline(
+                    x=mean_val, 
+                    line_dash="dot", 
+                    line_color="green",
+                    line_width=2,
+                    annotation_text=f"Media: {mean_val:.2f}",
+                    annotation_position="top left",
+                    annotation_font=dict(color="green", size=10)
+                )
+                
+                fig_hist.update_layout(
+                    plot_bgcolor='rgba(248,249,250,1)',
+                    paper_bgcolor='rgba(248,249,250,1)',
+                    font=dict(size=12, family='Arial'),
+                    title_font=dict(size=16, family='Arial', color='#2c3e50'),
+                    height=400,
+                    showlegend=False
+                )
+                
+                fig_hist.update_traces(
+                    marker_line_color='black',
+                    marker_line_width=1,
+                    hovertemplate=f"{'Distancia' if similarity_method == 'euclidean' else 'Similitud'}: %{{x}}<br>Frecuencia: %{{y}}<extra></extra>"
+                )
+                
+                fig_hist.update_xaxes(
+                    showgrid=True,
+                    gridcolor='lightgray',
+                    linecolor='black',
+                    linewidth=1,
+                    title_font=dict(size=12)
+                )
+                
+                fig_hist.update_yaxes(
+                    showgrid=True,
+                    gridcolor='lightgray',
+                    linecolor='black',
+                    linewidth=1,
+                    title_font=dict(size=12)
+                )
+                
+                st.plotly_chart(fig_hist, use_container_width=True)
+        
+        # --- GRÁFICO ADICIONAL: TIPOS DE CONEXIÓN ---
+        st.subheader("🔗 Análisis de Tipos de Conexión")
+        
+        col_anal3, col_anal4 = st.columns(2)
+        
+        with col_anal3:
+            # Gráfico de pie para tipos de conexión (intra-curso vs inter-curso)
+            if len(connections_list) > 0:
+                intra_curso = len([c for c in connections_list if c['curso_capitulo_1'] == c['curso_capitulo_2']])
+                inter_curso = len(connections_list) - intra_curso
+                
+                fig_pie = px.pie(
+                    values=[intra_curso, inter_curso],
+                    names=['Intra-curso', 'Inter-curso'],
+                    title="🎯 Tipos de Conexiones",
+                    color=['Intra-curso', 'Inter-curso'],
+                    color_discrete_map={'Intra-curso': '#FF6B6B', 'Inter-curso': '#4ECDC4'}
+                )
+                
+                fig_pie.update_traces(
+                    textinfo='percent+label',
+                    pull=[0.05, 0],
+                    marker=dict(line=dict(color='white', width=2)),
+                    hovertemplate='<b>%{label}</b><br>Cantidad: %{value}<br>Porcentaje: %{percent}<extra></extra>'
+                )
+                
+                fig_pie.update_layout(
+                    plot_bgcolor='rgba(248,249,250,1)',
+                    paper_bgcolor='rgba(248,249,250,1)',
+                    font=dict(size=12, family='Arial'),
+                    title_font=dict(size=16, family='Arial', color='#2c3e50'),
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=-0.2,
+                        xanchor="center",
+                        x=0.5
+                    ),
+                    height=350
+                )
+                
+                st.plotly_chart(fig_pie, use_container_width=True)
+        
+        with col_anal4:
+            # Gráfico de dispersión: similitud vs tipo de conexión
+            if len(connections_list) > 0:
+                # Preparar datos para el scatter plot
+                scatter_data = []
+                for conn in connections_list:
+                    scatter_data.append({
+                        'similitud': conn['similitud_original'],
+                        'tipo': 'Intra-curso' if conn['curso_capitulo_1'] == conn['curso_capitulo_2'] else 'Inter-curso',
+                        'curso1': conn['curso_capitulo_1'],
+                        'curso2': conn['curso_capitulo_2']
+                    })
+                
+                df_scatter = pd.DataFrame(scatter_data)
+                
+                fig_scatter = px.strip(
+                    df_scatter,
+                    x='tipo',
+                    y='similitud',
+                    color='tipo',
+                    title="📈 Similitud por Tipo de Conexión",
+                    labels={'similitud': f"{'Distancia' if similarity_method == 'euclidean' else 'Similitud'}", 
+                        'tipo': 'Tipo de Conexión'},
+                    color_discrete_map={'Intra-curso': '#FF6B6B', 'Inter-curso': '#4ECDC4'}
+                )
+                
+                # Agregar línea de umbral
+                fig_scatter.add_hline(
+                    y=threshold,
+                    line_dash="dash",
+                    line_color="red",
+                    line_width=2,
+                    annotation_text=f"Umbral: {threshold:.2f}"
+                )
+                
+                fig_scatter.update_layout(
+                    plot_bgcolor='rgba(248,249,250,1)',
+                    paper_bgcolor='rgba(248,249,250,1)',
+                    font=dict(size=12, family='Arial'),
+                    title_font=dict(size=16, family='Arial', color='#2c3e50'),
+                    showlegend=False,
+                    height=350
+                )
+                
+                fig_scatter.update_traces(
+                    marker=dict(size=8, opacity=0.7, line=dict(width=1, color='black')),
+                    jitter=0.3
+                )
+                
+                st.plotly_chart(fig_scatter, use_container_width=True)
+        
+        # --- ESTADÍSTICAS RÁPIDAS ---
+        st.subheader("📈 Estadísticas Rápidas")
+        
+        if len(connections_list) > 0:
+            sim_values = [conn['similitud_original'] for conn in connections_list]
+            intra_curso = len([c for c in connections_list if c['curso_capitulo_1'] == c['curso_capitulo_2']])
+            inter_curso = len(connections_list) - intra_curso
+            
+            col_stats1, col_stats2, col_stats3, col_stats4 = st.columns(4)
+            
+            with col_stats1:
+                st.metric(
+                    label="📊 Conexiones Totales",
+                    value=len(connections_list),
+                    delta=f"{intra_curso} intra-curso"
+                )
+            
+            with col_stats2:
+                st.metric(
+                    label="🔗 Conexiones Inter-curso",
+                    value=inter_curso,
+                    delta=f"{(inter_curso/len(connections_list)*100):.1f}%"
+                )
+            
+            with col_stats3:
+                st.metric(
+                    label=f"📏 {'Distancia' if similarity_method == 'euclidean' else 'Similitud'} Promedio",
+                    value=f"{np.mean(sim_values):.3f}",
+                    delta=f"±{np.std(sim_values):.3f}"
+                )
+            
+            with col_stats4:
+                st.metric(
+                    label="🎯 Densidad de Red",
+                    value=f"{densidad:.3f}",
+                    delta=f"{(densidad*100):.1f}%"
+                )
+
+    else:
+        st.warning("No se encontraron conexiones que cumplan con el umbral seleccionado. Intenta ajustar el umbral.")
+    
+    # --- RESTO DEL CÓDIGO ORIGINAL CON KEYS ÚNICOS ---
+    
+    # Mostrar estadísticas de la matriz
+    st.subheader("📊 Estadísticas de la Matriz de Similitud")
+    
+    # Excluir diagonal para estadísticas
+    upper_triangle = similarity_matrix[np.triu_indices_from(similarity_matrix, k=1)]
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    if similarity_method == 'euclidean':
+        # Para distancia euclidiana, valores más altos = más distantes
+        with col1:
+            st.metric("Distancia Promedio", f"{np.mean(upper_triangle):.3f}")
+        with col2:
+            st.metric("Distancia Máxima", f"{np.max(upper_triangle):.3f}")
+        with col3:
+            st.metric("Distancia Mínima", f"{np.min(upper_triangle):.3f}")
+        with col4:
+            st.metric("Desviación Estándar", f"{np.std(upper_triangle):.3f}")
+    else:
+        # Para coseno y producto punto, valores más altos = más similares
+        with col1:
+            st.metric("Similitud Promedio", f"{np.mean(upper_triangle):.3f}")
+        with col2:
+            st.metric("Similitud Máxima", f"{np.max(upper_triangle):.3f}")
+        with col3:
+            st.metric("Similitud Mínima", f"{np.min(upper_triangle):.3f}")
+        with col4:
+            st.metric("Desviación Estándar", f"{np.std(upper_triangle):.3f}")
+    
+    # Matriz de similitud completa
+    st.subheader("🔥 Matriz de Similitud Inter-Capítulo")
+    
+    method_names = {
+        'cosine': 'Similitud Coseno',
+        'euclidean': 'Similitud Euclidiana',
+        'dot_product': 'Producto Punto'
+    }
+    
+    try:
+        # Debug: verificar datos antes de crear el gráfico
+        st.write(f"Debug: similarity_matrix shape: {similarity_matrix.shape}")
+        st.write(f"Debug: labels length: {len(labels)}")
+        st.write(f"Debug: method: {similarity_method}")
+        
+        fig_matrix = create_similarity_heatmap(
+            similarity_matrix, 
+            labels, 
+            f"Matriz de Similitud Inter-Capítulo ({method_names[similarity_method]})",
+            similarity_method
+        )
+        
+        if fig_matrix is not None:
+            st.plotly_chart(fig_matrix, use_container_width=True)
+        else:
+            st.error("Error: create_similarity_heatmap devolvió None")
+            
+    except Exception as e:
+        st.error(f"Error creando matriz de similitud: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+    
+    # Heatmap de similitud promedio
+    st.subheader("📈 Similitud Promedio por Capítulo")
+    
+    try:
+        # Calcular promedio de similitud para cada capítulo (excluyendo la diagonal)
+        avg_similarities = []
+        for i in range(len(similarity_matrix)):
+            # Excluir la similitud consigo mismo (diagonal)
+            similarities = np.concatenate([similarity_matrix[i][:i], similarity_matrix[i][i+1:]])
+            avg_similarities.append(np.mean(similarities))
+        
+        # Crear DataFrame para mejor visualización
+        df_avg = pd.DataFrame({
+            'Capítulo': labels,
+            'Curso': courses,
+            'Similitud_Promedio': avg_similarities
+        })
+        
+        # Ordenar por curso y número para mejor visualización
+        df_avg = df_avg.sort_values(['Curso', 'Capítulo'])
+        
+        # Gráfico de barras horizontal
+        fig_avg = px.bar(
+            df_avg,
+            y='Capítulo',
+            x='Similitud_Promedio',
+            color='Curso',
+            orientation='h',
+            title=f"Similitud Promedio por Capítulo ({method_names[similarity_method]})",
+            labels={
+                'Similitud_Promedio': f'{"Distancia" if similarity_method == "euclidean" else "Similitud"} Promedio',
+                'Capítulo': 'Capítulos'
+            },
+            height=800
+        )
+        fig_avg.update_layout(
+            yaxis=dict(tickfont=dict(size=8)),
+            showlegend=True,
+            xaxis_title=f'{"Distancia" if similarity_method == "euclidean" else "Similitud"} Promedio',
+            yaxis_title="Capítulos"
+        )
+        st.plotly_chart(fig_avg, use_container_width=True)
+        st.write(f"Debug: Se creó gráfico con {len(df_avg)} capítulos")
+        
+    except Exception as e:
+        st.error(f"Error creando gráfico promedio: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+    
+    # ... (Aquí continuaría el resto del código original, pero necesitarías agregar keys únicos a todos los widgets adicionales)
+    
+    # Para los botones finales de descarga, usar keys únicos:
+    col_download1, col_download2 = st.columns(2)
+    
+    with col_download1:
+        if st.button("💾 Descargar Matriz de Similitud como CSV", key="download_matrix_btn_threshold_unique"):
+            # Crear DataFrame de la matriz
+            matrix_df = pd.DataFrame(similarity_matrix, index=labels, columns=labels)
+            csv = matrix_df.to_csv()
+            file_name_matrix = f"matriz_similitud_{similarity_method}_{safe_filename(curso_seleccionado)}.csv"
+            debug_string("file_name_matrix", file_name_matrix)
+            st.download_button(
+                label="Descargar Matriz CSV",
+                data=csv,
+                file_name=file_name_matrix,
+                mime="text/csv",
+                key="download_matrix_threshold_unique"
+            )
+    
+    with col_download2:
+        if st.button("📊 Descargar Tabla de Métricas como CSV", key="download_metrics_btn_threshold_unique"):
+            # Asumiendo que filtered_table existe del código anterior
+            csv_metrics = filtered_table.to_csv(index=False) if 'filtered_table' in locals() else pd.DataFrame().to_csv()
+            file_name_metrics = f"metricas_completas_{similarity_method}_{safe_filename(curso_seleccionado)}.csv"
+            debug_string("file_name_metrics", file_name_metrics)
+            st.download_button(
+                label="Descargar Métricas CSV",
+                data=csv_metrics,
+                file_name=file_name_metrics,
+                mime="text/csv",
+                key="download_metrics_threshold_unique"
+            )
+
 def debug_string(label, value):
     try:
         st.write(f"DEBUG {label}: {repr(value)}")
@@ -1448,7 +2197,7 @@ def main():
     st.markdown("Herramientas de análisis y visualización para contenido educativo")
     
     # Sistema de pestañas
-    tab1, tab2, tab5 = st.tabs(["📊 Embeddings", "🔥 Similitud", "🔍 Búsqueda Semántica"])
+    tab1, tab2, tab3, tab5 = st.tabs(["📊 Embeddings", "🔥 Similitud", "🧱 Umbrales de Similitud", "🔍 Búsqueda Semántica"])
     
     with tab1:
         embeddings_tab()
@@ -1456,6 +2205,9 @@ def main():
     with tab2:
         similarity_heatmaps_tab()
     
+    with tab3:
+        similarity_heatmaps_tab_with_threshold()
+
     with tab5:
         semantic_search_tab()
     
