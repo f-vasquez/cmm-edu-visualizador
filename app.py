@@ -14,6 +14,7 @@ import unicodedata
 import re
 import sys
 import io
+import ast
 
 # Cargar variables de entorno
 load_dotenv()
@@ -2004,7 +2005,7 @@ def similarity_heatmaps_tab_with_percentiles():
         ) if use_percentil else None
     
     with col_config2:
-        use_umbral = st.checkbox("Usar filtro por umbral absoluto", value=False, key="use_umbral")
+        use_umbral = st.checkbox("Usar filtro por umbral absoluto", value=True, key="use_umbral")
         if use_umbral:
             if similarity_method == 'euclidean':
                 umbral_absoluto = st.slider("Umbral de distancia máxima:", 0.0, 2.0, 1.0, 0.01,
@@ -2206,7 +2207,7 @@ def similarity_heatmaps_tab_with_percentiles():
                 "📥 Descargar Conexiones por Capítulo (CSV)",
                 df_conexiones_por_capitulo.to_csv(index=False),
                 "_".join(filename_parts) + ".csv", "text/csv",
-                key="download_conexiones_por_capitulo_percentiles"
+                key="download_conexiones_por_capitulo_percentiles_unique"
             )
         
         # --- ANÁLISIS GRÁFICO ---
@@ -2382,6 +2383,1185 @@ def similarity_heatmaps_tab_with_percentiles():
                              f"estadisticas_completas_percentiles_{similarity_method}.csv", "text/csv",
                              key="download_stats_percentiles")
 
+# Extra tab for percentiles and thresholds - VERSION matrix keywords with percentiles
+def similarity_heatmaps_tab_with_percentiles_keywords():
+    """Pestaña para heatmaps de similitud con percentiles en las keywords y umbrales"""
+    st.markdown('<h1 class="main-header">🎯 Método de Percentiles por Keywords</h1>', unsafe_allow_html=True)
+    
+    # Cargar datos
+    df = load_data()
+    if df is None:
+        st.error("No se pudieron cargar los datos. Verifica que el archivo CSV esté en la carpeta 'data/'.")
+        return
+    
+    # --- FUNCIONES AUXILIARES ---
+    def crear_capitulo_id(row):
+        """Crear identificador único de capítulo"""
+        curso_abbr = str(row['curso']).replace('Primero', '1B').replace('Segundo', '2B')\
+                                    .replace('Tercero', '3B').replace('Cuarto', '4B')\
+                                    .replace('Quinto', '5B').replace('Sexto', '6B')
+        return f"{curso_abbr}: Capítulo N°{row['numero']}: {row['titulo']}"
+    
+    def cargar_keywords():
+        """Cargar y preparar datos de keywords"""
+        try:
+            keywords_df = pd.read_csv("data/capitulos_keywords_count.csv")
+            keywords_dict = keywords_df.set_index('id')['num_keywords'].to_dict()
+            keywords_df['capitulo_id'] = keywords_df.apply(crear_capitulo_id, axis=1)
+            id_to_capitulo_dict = keywords_df.set_index('id')['capitulo_id'].to_dict()
+            return keywords_dict, id_to_capitulo_dict
+        except Exception as e:
+            st.warning(f"No se pudo cargar el archivo de keywords: {e}")
+            return {}, {}
+    
+    def parse_embeddings(df):
+        """Convertir strings de embeddings a listas de floats"""
+        df = df.copy()
+        df['keywords_embedding'] = df['keywords_embedding'].apply(lambda x: np.array(ast.literal_eval(x), dtype=float))
+        return df
+    
+    def calcular_matriz_percentil(df_unique, method="cosine", percentil=80):
+        """Construir matriz de similitud filtrada por percentiles entre keywords de capítulos"""
+        n = len(df_unique)
+        mat = np.zeros((n, n))
+        
+        # Precompute todos los embeddings
+        embeddings = []
+        for i in range(n):
+            emb = df_unique.iloc[i]['keywords_embedding']
+            if emb.ndim == 1:
+                emb = emb.reshape(1, -1)
+            embeddings.append(emb)
+        
+        for i in range(n):
+            emb_i = embeddings[i]
+            J_i = emb_i.shape[0]  # Número de keywords del capítulo i
+            
+            for j in range(i, n):
+                emb_j = embeddings[j]
+                J_j = emb_j.shape[0]  # Número de keywords del capítulo j
+                
+                # Calcular matriz de similitud entre TODAS las keywords
+                if method == "cosine":
+                    # Normalizar embeddings para cosine similarity
+                    norms_i = np.linalg.norm(emb_i, axis=1, keepdims=True)
+                    norms_j = np.linalg.norm(emb_j, axis=1, keepdims=True)
+                    emb_i_norm = emb_i / np.where(norms_i == 0, 1, norms_i)
+                    emb_j_norm = emb_j / np.where(norms_j == 0, 1, norms_j)
+                    S_ij = emb_i_norm @ emb_j_norm.T
+                elif method == "euclidean":
+                    # Calcular matriz de distancias euclidianas
+                    S_ij = np.sqrt(
+                        np.sum(emb_i**2, axis=1)[:, None] + 
+                        np.sum(emb_j**2, axis=1)[None, :] - 
+                        2 * emb_i @ emb_j.T
+                    )
+                elif method == "dot_product":
+                    S_ij = emb_i @ emb_j.T
+                else:
+                    raise ValueError("Método desconocido")
+                
+                # APLICAR METODOLOGÍA: Filtrar por percentil
+                if i == j:
+                    # Para el mismo capítulo, usar similitud máxima
+                    mat[i, j] = 1.0 if method != "euclidean" else 0.0
+                    mat[j, i] = mat[i, j]
+                else:
+                    # Para capítulos diferentes, aplicar filtrado por percentil
+                    
+                    # 1. Obtener solo la parte triangular superior sin diagonal
+                    if J_i == 1 and J_j == 1:
+                        # Caso especial: solo una keyword en cada capítulo
+                        sim_vals = S_ij.flatten()
+                    else:
+                        # Crear máscara para triangular superior
+                        mask = np.triu(np.ones((J_i, J_j), k=1), k=1).astype(bool)
+                        sim_vals = S_ij[mask]
+                    
+                    if len(sim_vals) > 0:
+                        # 2. Calcular percentil según el método
+                        if method == "euclidean":
+                            # Para distancias, percentil inferior (distancias más pequeñas = más similares)
+                            tau_p = np.percentile(sim_vals, percentil)
+                            mask_filtro = S_ij <= tau_p
+                        else:
+                            # Para similitudes, percentil superior (similitudes más altas)
+                            tau_p = np.percentile(sim_vals, 100 - percentil)
+                            mask_filtro = S_ij >= tau_p
+                        
+                        # 3. Aplicar máscara binaria (producto de Hadamard)
+                        S_ij_filtrado = S_ij * mask_filtro
+                        
+                        # 4. Calcular promedio solo sobre valores no cero
+                        valores_no_cero = S_ij_filtrado[mask_filtro]
+                        if len(valores_no_cero) > 0:
+                            promedio = np.mean(valores_no_cero)
+                        else:
+                            promedio = 0.0
+                    else:
+                        promedio = 0.0
+                    
+                    mat[i, j] = promedio
+                    mat[j, i] = promedio
+        
+        return mat
+    
+    def crear_conexiones_por_capitulo(connections_list, df_unique, similarity_method, keywords_dict):
+        """Crear DataFrame de conexiones agrupadas por capítulo"""
+        capitulo_conexiones = {}
+        
+        for conn in connections_list:
+            cap1, cap2 = conn['capitulo_1'], conn['capitulo_2']
+            curso1, curso2 = conn['curso_capitulo_1'], conn['curso_capitulo_2']
+            similitud = conn['similitud_original']
+            
+            for cap, curso in [(cap1, curso1), (cap2, curso2)]:
+                if cap not in capitulo_conexiones:
+                    capitulo_conexiones[cap] = {
+                        'curso': curso,
+                        'capitulos_relacionados': [],
+                        'similitudes': []
+                    }
+                capitulo_conexiones[cap]['capitulos_relacionados'].append(cap2 if cap == cap1 else cap1)
+                capitulo_conexiones[cap]['similitudes'].append(similitud)
+        
+        # Ordenar conexiones por similitud
+        for cap, data in capitulo_conexiones.items():
+            combined = list(zip(data['capitulos_relacionados'], data['similitudes']))
+            reverse = similarity_method != 'euclidean'
+            combined_sorted = sorted(combined, key=lambda x: x[1], reverse=reverse)
+            data['capitulos_relacionados'] = [item[0] for item in combined_sorted]
+            data['similitudes'] = [item[1] for item in combined_sorted]
+        
+        # Crear DataFrame final
+        conexiones_por_capitulo = []
+        for cap, data in capitulo_conexiones.items():
+            # Buscar número de capítulo y keywords
+            numero_capitulo, cap_id_principal = 0, None
+            for idx, row in df_unique.iterrows():
+                capitulo_id_actual = crear_capitulo_id(row)
+                if capitulo_id_actual == cap:
+                    numero_capitulo, cap_id_principal = row['numero'], row['id']
+                    break
+            
+            keywords_principal = keywords_dict.get(cap_id_principal, 0) if cap_id_principal else 0
+            
+            # Obtener keywords de capítulos relacionados
+            keywords_relacionados_list = []
+            for cap_relacionado in data['capitulos_relacionados']:
+                cap_id_relacionado = None
+                for idx, row in df_unique.iterrows():
+                    if crear_capitulo_id(row) == cap_relacionado:
+                        cap_id_relacionado = row['id']
+                        break
+                kw_rel = keywords_dict.get(cap_id_relacionado, 0) if cap_id_relacionado else 0
+                keywords_relacionados_list.append(str(kw_rel))
+            
+            conexiones_por_capitulo.append({
+                'curso': data['curso'],
+                'capitulo': cap,
+                'numero_capitulo': numero_capitulo,
+                'keywords_principal': keywords_principal,
+                'numero_conexiones': len(data['capitulos_relacionados']),
+                'capitulos_relacionados': ', '.join(data['capitulos_relacionados']),
+                'keywords_relacionados': ', '.join(keywords_relacionados_list),
+                'similitudes': ', '.join([f"{sim:.4f}" for sim in data['similitudes']])
+            })
+        
+        df_result = pd.DataFrame(conexiones_por_capitulo)
+        df_result = df_result.sort_values(['curso', 'numero_capitulo'], ascending=[True, True])
+        return df_result.drop('numero_capitulo', axis=1)
+    
+    def filtrar_conexiones_mayor_grado(connections_list):
+        """Filtrar conexiones que involucren cursos de diferente grado"""
+        orden_cursos = ['Primero Básico', 'Segundo Básico', 'Tercero Básico', 
+                       'Cuarto Básico', 'Quinto Básico', 'Sexto Básico']
+        
+        return [conn for conn in connections_list 
+                if orden_cursos.index(conn['curso_capitulo_1']) != orden_cursos.index(conn['curso_capitulo_2'])]
+    
+    # --- CONFIGURACIÓN DE SIMILITUD ---
+    st.subheader("Configuración de Similitud")
+    
+    col_sel1, col_sel2 = st.columns(2)
+    with col_sel1:
+        similarity_method = st.selectbox(
+            "Método de Similitud:",
+            ['cosine', 'euclidean', 'dot_product'],
+            format_func=lambda x: {'cosine': 'Similitud Coseno', 'euclidean': 'Distancia Euclidiana', 
+                                 'dot_product': 'Producto Punto'}[x],
+            help="Selecciona el método para calcular similitud entre embeddings de keywords",
+            key="similarity_percentiles_keywords_method"
+        )
+    
+    cursos_disponibles = ['Todos'] + ordenar_cursos_personalizado(df['curso'].unique().tolist())
+    with col_sel2:
+        curso_seleccionado = st.selectbox(
+            "Filtrar por Curso:", cursos_disponibles,
+            help="Filtrar matriz por curso específico", key="sim_percentiles_keywords_curso"
+        )
+    
+    # --- CONFIGURACIÓN DE PARÁMETROS ---
+    st.subheader("🎯 Parámetros de la Metodología")
+    
+    col_config1, col_config2 = st.columns(2)
+    with col_config1:
+        percentil = st.slider(
+            "Percentil p:", 0, 100, 80, 1,
+            help="Conserva solo el top (100-p)% de las comparaciones más similares entre keywords",
+            key="percentil_slider_keywords"
+        )
+        st.info(f"**p = {percentil}%**")
+    
+    with col_config2:
+        if similarity_method == 'euclidean':
+            threshold = st.slider(
+                "Umbral r:", 0.0, 2.0, 1.0, 0.01,
+                help="Capítulos relacionados si distancia promedio ≤ r",
+                key="threshold_slider_keywords"
+            )
+        else:
+            threshold = st.slider(
+                "Umbral r:", 0.0, 1.0, 0.5, 0.01,
+                help="Capítulos relacionados si similitud promedio ≥ r",
+                key="threshold_slider_keywords"
+            )
+        st.info(f"**r = {threshold:.2f}**")
+    
+    # --- PROCESAMIENTO DE DATOS ---
+    df_filtrado = df if curso_seleccionado == 'Todos' else df[df['curso'] == curso_seleccionado]
+    if len(df_filtrado) == 0:
+        st.warning("No hay datos para mostrar con los filtros seleccionados.")
+        return
+    
+    df_unique = df_filtrado.drop_duplicates(subset=['id']).copy()
+    df_unique = parse_embeddings(df_unique)
+    df_unique['capitulo_id'] = df_unique.apply(crear_capitulo_id, axis=1)
+    
+    labels = df_unique['capitulo_id'].tolist()
+    courses = df_unique['curso'].tolist()
+    
+    # --- INFORMACIÓN GENERAL ---
+    col_info1, col_info2, col_info3, col_info4 = st.columns(4)
+    with col_info1: st.metric("Capítulos Únicos", len(df_unique))
+    with col_info2: st.metric("Dimensión Keywords", df_unique.iloc[0]['keywords_embedding'].shape[0])
+    with col_info3: st.metric("Método", {'cosine': 'Coseno', 'euclidean': 'Euclidiana', 'dot_product': 'Producto Punto'}[similarity_method])
+    with col_info4: st.metric("Configuración", f"p={percentil}%, r={threshold:.2f}")
+    
+    # --- CÁLCULO DE MATRICES ---
+    st.subheader(f"🧮 Construyendo Matriz con Percentil p={percentil}%")
+    with st.spinner("Calculando matriz de similitud filtrada por percentil..."):
+        similarity_matrix = calcular_matriz_percentil(df_unique, similarity_method, percentil)
+    
+    # --- MATRIZ DE ADYACENCIA ---
+    st.subheader("🎯 Matriz de Adyacencia")
+    
+    if similarity_method == "euclidean":
+        adjacency_matrix = (similarity_matrix <= threshold).astype(int)
+    else:
+        adjacency_matrix = (similarity_matrix >= threshold).astype(int)
+    np.fill_diagonal(adjacency_matrix, 0)
+    
+    total_possible_keyword_pairs = 0
+    actual_keyword_pairs = 0
+    actual_connections = np.sum(adjacency_matrix) / 2
+    
+    for i in range(len(df_unique)):
+        emb_i = df_unique.iloc[i]['keywords_embedding']
+        J_i = emb_i.shape[0] if emb_i.ndim > 1 else 1
+        for j in range(i+1, len(df_unique)):
+            emb_j = df_unique.iloc[j]['keywords_embedding']  
+            J_j = emb_j.shape[0] if emb_j.ndim > 1 else 1
+            total_possible_keyword_pairs += J_i * J_j
+            if adjacency_matrix[i, j] == 1:
+                actual_keyword_pairs += 1
+
+    # Métricas actualizadas
+    col_stats1, col_stats2 = st.columns(2)
+    with col_stats1: 
+        st.metric("Conexiones entre Capítulos", int(actual_connections))
+    with col_stats2: 
+        st.metric("Pares de Keywords Relacionados", actual_keyword_pairs)
+    
+    col_stats3, col_stats4 = st.columns(2)
+    with col_stats3: 
+        densidad_keywords = actual_keyword_pairs / total_possible_keyword_pairs if total_possible_keyword_pairs > 0 else 0
+        st.metric("Densidad Keywords", f"{densidad_keywords:.4f}")
+    with col_stats4: 
+        st.metric("Configuración", f"p={percentil}%, r={threshold:.2f}")
+    
+    # Mostrar heatmap
+    method_names = {'cosine': 'Similitud Coseno', 'euclidean': 'Distancia Euclidiana', 'dot_product': 'Producto Punto'}
+    titulo = f"Matriz de Adyacencia - Percentil {percentil}% + Umbral {threshold:.2f} ({method_names[similarity_method]})"
+    
+    try:
+        fig_adjacency = create_similarity_heatmap(adjacency_matrix, labels, titulo, 'binary')
+        if fig_adjacency: st.plotly_chart(fig_adjacency, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error creando matriz de adyacencia: {str(e)}")
+    
+    # --- LISTA DE CONEXIONES ---
+    connections_list = []
+    for i in range(len(adjacency_matrix)):
+        for j in range(i+1, len(adjacency_matrix)):
+            if adjacency_matrix[i, j] == 1:
+                connections_list.append({
+                    'curso_capitulo_1': courses[i], 'capitulo_1': labels[i],
+                    'curso_capitulo_2': courses[j], 'capitulo_2': labels[j],
+                    'similitud_original': similarity_matrix[i, j],
+                    'percentil_aplicado': percentil,
+                    'umbral_absoluto': threshold
+                })
+    
+    connections_df = pd.DataFrame(connections_list)
+    
+    # --- DESCARGAS PRINCIPALES ---
+    st.subheader("📥 Descargar Matriz de Adyacencia")
+    
+    col_download1, col_download2 = st.columns(2)
+    adj_df = pd.DataFrame(adjacency_matrix, index=labels, columns=labels)
+    
+    with col_download1:
+        if st.button("💾 Matriz de Adyacencia (CSV)", key="download_adj_btn_keywords"):
+            csv_adj = adj_df.to_csv()
+            file_name = f"matriz_adyacencia_keywords_p{percentil}_r{threshold:.2f}_{similarity_method}.csv"
+            st.download_button("Descargar Matriz CSV", csv_adj, file_name, "text/csv", key="download_adj_matrix_keywords")
+    
+    with col_download2:
+        if st.button("📊 Lista de Conexiones (CSV)", key="download_conn_btn_keywords"):
+            if connections_list:
+                csv_connections = connections_df.to_csv(index=False)
+                file_name = f"conexiones_keywords_p{percentil}_r{threshold:.2f}_{similarity_method}.csv"
+                st.download_button("Descargar Conexiones CSV", csv_connections, file_name, "text/csv", key="download_connections_keywords")
+            else:
+                st.warning("No hay conexiones que cumplan con los filtros seleccionados.")
+    
+    # --- ANÁLISIS DETALLADO (solo si hay conexiones) ---
+    if connections_list:
+        st.subheader("🔍 Vista Previa de Conexiones Identificadas")
+        st.write(f"**Se encontraron {len(connections_list)} conexiones con los filtros aplicados:**")
+        
+        display_connections = connections_df.head(10).copy()
+        if similarity_method == 'euclidean':
+            display_connections = display_connections.rename(columns={'similitud_original': 'distancia_original'})
+        st.dataframe(display_connections, use_container_width=True)
+        
+        # --- CONEXIONES AGRUPADAS POR CAPÍTULO ---
+        st.subheader("📋 Conexiones por Capítulo (Ordenadas por Curso y Capítulo)")
+        
+        keywords_dict, _ = cargar_keywords()
+        df_conexiones_por_capitulo = crear_conexiones_por_capitulo(connections_list, df_unique, similarity_method, keywords_dict)
+        
+        st.write(f"**Conexiones agrupadas por capítulo ({len(df_conexiones_por_capitulo)} capítulos con conexiones):**")
+        st.dataframe(df_conexiones_por_capitulo, use_container_width=True, height=400)
+        
+        # Estadísticas rápidas de conexiones
+        if not df_conexiones_por_capitulo.empty:
+            col_stats1, col_stats2, col_stats3 = st.columns(3)
+            with col_stats1:
+                avg_connections = df_conexiones_por_capitulo['numero_conexiones'].mean()
+                st.metric("Promedio conexiones/capítulo", f"{avg_connections:.1f}")
+            with col_stats2:
+                max_connections = df_conexiones_por_capitulo['numero_conexiones'].max()
+                st.metric("Máximo conexiones", max_connections)
+            with col_stats3:
+                min_connections = df_conexiones_por_capitulo['numero_conexiones'].min()
+                st.metric("Mínimo conexiones", min_connections)
+        
+        # Descargar conexiones por capítulo
+        if not df_conexiones_por_capitulo.empty:
+            filename_parts = ["conexiones_por_capitulo_keywords", f"p{percentil}", f"r{threshold:.2f}", similarity_method]
+            
+            st.download_button(
+                "📥 Descargar Conexiones por Capítulo (CSV)",
+                df_conexiones_por_capitulo.to_csv(index=False),
+                "_".join(filename_parts) + ".csv", "text/csv",
+                key="download_conexiones_por_capitulo_keywords_unique"
+            )
+        
+        # --- ANÁLISIS GRÁFICO ---
+        st.subheader("📊 Análisis de las Conexiones")
+        
+        col_anal1, col_anal2 = st.columns(2)
+        
+        with col_anal1:
+            # Gráfico de distribución por curso con filtro
+            st.write("**🎯 Filtro de Conexiones**")
+            filtrar_mayor_grado = st.checkbox(
+                "Mostrar solo conexiones con cursos de mayor grado", False,
+                help="Si está activado, solo se considerarán conexiones donde al menos un curso sea de grado superior",
+                key="filtrar_mayor_grado_keywords"
+            )
+            
+            connections_list_filtrada = filtrar_conexiones_mayor_grado(connections_list) if filtrar_mayor_grado else connections_list
+            titulo_grafico = "📚 Conexiones con Cursos de Mayor Grado" if filtrar_mayor_grado else "📚 Distribución de Conexiones por Curso"
+            
+            if connections_list_filtrada:
+                course_connections = []
+                for conn in connections_list_filtrada:
+                    course_connections.extend([conn['curso_capitulo_1'], conn['curso_capitulo_2']])
+                
+                course_counts = pd.Series(course_connections).value_counts().reset_index()
+                course_counts.columns = ['Curso', 'Conexiones']
+                
+                fig_courses = px.bar(course_counts, x='Curso', y='Conexiones', title=titulo_grafico,
+                                   color='Conexiones', color_continuous_scale='viridis', text='Conexiones')
+                fig_courses.update_layout(xaxis_tickangle=45, plot_bgcolor='rgba(248,249,250,1)',
+                                        paper_bgcolor='rgba(248,249,250,1)', showlegend=False, height=400)
+                fig_courses.update_traces(textposition='outside', marker_line_color='black', marker_line_width=1)
+                st.plotly_chart(fig_courses, use_container_width=True)
+                
+                if filtrar_mayor_grado:
+                    st.info(f"**Conexiones con mayor grado:** {len(connections_list_filtrada)} de {len(connections_list)} totales ({(len(connections_list_filtrada)/len(connections_list)*100):.1f}%)")
+            else:
+                st.warning("No hay conexiones que cumplan con el filtro seleccionado.")
+        
+        with col_anal2:
+            # Histograma de similitudes
+            if connections_list:
+                sim_values = [conn['similitud_original'] for conn in connections_list]
+                titulo_hist = f"📊 Distribución de {'Distancias' if similarity_method == 'euclidean' else 'Similitudes'}"
+                
+                fig_hist = px.histogram(x=sim_values, title=titulo_hist, nbins=20,
+                                      labels={'x': f"{'Distancia' if similarity_method == 'euclidean' else 'Similitud'}", 'y': 'Frecuencia'},
+                                      color_discrete_sequence=['#1f77b4'], opacity=0.8, marginal="box")
+                
+                fig_hist.add_vline(x=threshold, line_dash="dot", line_color="blue",
+                                 annotation_text=f"Umbral: {threshold:.2f}")
+                
+                fig_hist.update_layout(plot_bgcolor='rgba(248,249,250,1)', paper_bgcolor='rgba(248,249,250,1)',
+                                     height=400, showlegend=False)
+                st.plotly_chart(fig_hist, use_container_width=True)
+        
+        # --- ANÁLISIS DE TIPOS DE CONEXIÓN ---
+        st.subheader("🔗 Análisis de Tipos de Conexión")
+        
+        col_anal3, col_anal4 = st.columns(2)
+        
+        with col_anal3:
+            # Gráfico de pie
+            if connections_list:
+                intra_curso = len([c for c in connections_list if c['curso_capitulo_1'] == c['curso_capitulo_2']])
+                inter_curso = len(connections_list) - intra_curso
+                
+                fig_pie = px.pie(values=[intra_curso, inter_curso], names=['Intra-curso', 'Inter-curso'],
+                               title="🎯 Tipos de Conexiones", color=['Intra-curso', 'Inter-curso'],
+                               color_discrete_map={'Intra-curso': '#FF6B6B', 'Inter-curso': '#4ECDC4'})
+                fig_pie.update_traces(textinfo='percent+label', pull=[0.05, 0],
+                                    marker=dict(line=dict(color='white', width=2)))
+                fig_pie.update_layout(plot_bgcolor='rgba(248,249,250,1)', paper_bgcolor='rgba(248,249,250,1)',
+                                    height=350, showlegend=True,
+                                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_pie, use_container_width=True)
+        
+        with col_anal4:
+            # Violin plot
+            if connections_list:
+                scatter_data = [{
+                    'similitud': conn['similitud_original'],
+                    'tipo': 'Intra-curso' if conn['curso_capitulo_1'] == conn['curso_capitulo_2'] else 'Inter-curso'
+                } for conn in connections_list]
+                
+                df_scatter = pd.DataFrame(scatter_data)
+                fig_violin = px.violin(df_scatter, x='tipo', y='similitud', color='tipo', box=True, points="all",
+                                     title="🎻 Distribución por Tipo de Conexión",
+                                     labels={'similitud': f"{'Distancia' if similarity_method == 'euclidean' else 'Similitud'}"},
+                                     color_discrete_map={'Intra-curso': '#FF6B6B', 'Inter-curso': '#4ECDC4'})
+                
+                fig_violin.add_hline(y=threshold, line_dash="dot", line_color="blue", line_width=2,
+                                   annotation_text=f"Umbral: {threshold:.4f}")
+                
+                fig_violin.update_layout(plot_bgcolor='rgba(248,249,250,1)', paper_bgcolor='rgba(248,249,250,1)',
+                                       height=350, showlegend=False)
+                st.plotly_chart(fig_violin, use_container_width=True)
+        
+        # --- ESTADÍSTICAS RÁPIDAS ---
+        st.subheader("📈 Estadísticas Rápidas")
+
+        # CALCULAR densidad aquí antes de usarla
+        total_possible_connections = len(similarity_matrix) * (len(similarity_matrix) - 1) / 2
+        actual_connections = np.sum(adjacency_matrix) / 2
+
+        # Calcular densidad de forma segura
+        try:
+            if total_possible_connections > 0:
+                densidad = float(actual_connections) / float(total_possible_connections)
+            else:
+                densidad = 0.0
+            # Asegurar que no sea NaN y esté en rango [0,1]
+            if np.isnan(densidad):
+                densidad = 0.0
+            densidad = max(0.0, min(1.0, densidad))
+        except (ZeroDivisionError, ValueError, TypeError) as e:
+            st.warning(f"Error calculando densidad: {e}")
+            densidad = 0.0
+
+        # Ahora sí usar densidad en las estadísticas
+        sim_values = [conn['similitud_original'] for conn in connections_list] if connections_list else []
+        intra_curso = len([c for c in connections_list if c['curso_capitulo_1'] == c['curso_capitulo_2']]) if connections_list else 0
+        inter_curso = len(connections_list) - intra_curso if connections_list else 0
+
+        col_stats1, col_stats2, col_stats3, col_stats4 = st.columns(4)
+
+        # Métricas con manejo de errores
+        with col_stats1: 
+            st.metric("📊 Conexiones Totales", len(connections_list), delta=f"{intra_curso} intra-curso")
+
+        with col_stats2: 
+            inter_percent = (inter_curso/len(connections_list)*100) if connections_list and len(connections_list) > 0 else 0
+            st.metric("🔗 Conexiones Inter-curso", inter_curso, delta=f"{inter_percent:.1f}%")
+
+        with col_stats3: 
+            sim_mean = np.mean(sim_values) if sim_values else 0
+            sim_std = np.std(sim_values) if sim_values else 0
+            st.metric(f"📏 {'Distancia' if similarity_method == 'euclidean' else 'Similitud'} Promedio", 
+                    f"{sim_mean:.3f}", delta=f"±{sim_std:.3f}")
+
+        with col_stats4: 
+            # Asegurar que densidad sea un número válido antes de formatear
+            try:
+                densidad_val = float(densidad)
+                densidad_formatted = f"{densidad_val:.3f}"
+                delta_percent = f"{(densidad_val*100):.1f}%"
+            except (ValueError, TypeError):
+                densidad_formatted = "0.000"
+                delta_percent = "0.0%"
+            
+            st.metric("🎯 Densidad de Red", densidad_formatted, delta=delta_percent)
+
+    else:
+        st.warning("No se encontraron conexiones que cumplan con el umbral seleccionado. Intenta ajustar el umbral.")
+            
+    # --- MATRIZ COMPLETA Y ESTADÍSTICAS FINALES ---
+    st.subheader("🔥 Matriz de Similitud Filtrada por Percentil")
+    
+    try:
+        fig_matrix = create_similarity_heatmap(similarity_matrix, labels, 
+                                             f"Matriz de Similitud Filtrada (p={percentil}%) ({method_names[similarity_method]})", 
+                                             similarity_method)
+        if fig_matrix: st.plotly_chart(fig_matrix, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error creando matriz de similitud filtrada: {str(e)}")
+    
+    # Estadísticas finales
+    st.subheader("📊 Estadísticas de la Matriz de Similitud Filtrada")
+    upper_triangle = similarity_matrix[np.triu_indices_from(similarity_matrix, k=1)]
+    
+    col1, col2, col_stats3, col_stats4 = st.columns(4)
+    if similarity_method == 'euclidean':
+        with col1: st.metric("Distancia Promedio", f"{np.mean(upper_triangle):.3f}")
+        with col2: st.metric("Distancia Máxima", f"{np.max(upper_triangle):.3f}")
+        with col_stats3: st.metric("Distancia Mínima", f"{np.min(upper_triangle):.3f}")
+        with col_stats4: st.metric("Desviación Estándar", f"{np.std(upper_triangle):.3f}")
+    else:
+        with col1: st.metric("Similitud Promedio", f"{np.mean(upper_triangle):.3f}")
+        with col2: st.metric("Similitud Máxima", f"{np.max(upper_triangle):.3f}")
+        with col_stats3: st.metric("Similitud Mínima", f"{np.min(upper_triangle):.3f}")
+        with col_stats4: st.metric("Desviación Estándar", f"{np.std(upper_triangle):.3f}")
+    
+    # --- DESCARGAS FINALES ---
+    st.subheader("📥 Descargas Finales")
+    
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        if st.button("💾 Descargar Matriz de Similitud como CSV", key="download_matrix_btn_keywords"):
+            matrix_df = pd.DataFrame(similarity_matrix, index=labels, columns=labels)
+            st.download_button("Descargar Matriz CSV", matrix_df.to_csv(), 
+                             f"matriz_similitud_keywords_p{percentil}_{similarity_method}.csv", "text/csv",
+                             key="download_matrix_keywords")
+    
+    with col_dl2:
+        if st.button("📊 Descargar Estadísticas Completas", key="download_stats_btn_keywords"):
+            stats_data = {
+                'Método': [similarity_method], 'Capítulos Analizados': [len(df_unique)],
+                'Conexiones Totales': [len(connections_list) if connections_list else 0],
+                'Densidad Red': [densidad], 'Percentil Aplicado': [percentil],
+                'Umbral Absoluto': [threshold],
+                'Similitud Promedio': [np.mean(upper_triangle)], 'Similitud Máxima': [np.max(upper_triangle)],
+                'Similitud Mínima': [np.min(upper_triangle)], 'Desviación Estándar': [np.std(upper_triangle)]
+            }
+            stats_df = pd.DataFrame(stats_data)
+            st.download_button("Descargar Estadísticas CSV", stats_df.to_csv(index=False),
+                             f"estadisticas_keywords_p{percentil}_{similarity_method}.csv", "text/csv",
+                             key="download_stats_keywords")
+
+# Extra tab with percentile methodology for keywords - VERSION "CORREGIDA" uso de dataframe extra, creo que esto aplica otro tipo de método
+def similarity_heatmaps_tab_with_percentiles_keywords_dataframe_esp():
+    """Pestaña para heatmaps de similitud con percentiles en las keywords y umbrales"""
+    st.markdown('<h1 class="main-header">🎯 Método de Percentiles por Keywords</h1>', unsafe_allow_html=True)
+    
+    # Cargar datos principales
+    df = load_data()
+    if df is None:
+        st.error("No se pudieron cargar los datos. Verifica que el archivo CSV esté en la carpeta 'data/'.")
+        return
+    
+    # --- CONFIGURACIÓN ---
+    st.subheader("⚙ Configuración")
+    
+    col_sel1, col_sel2 = st.columns(2)
+    with col_sel1:
+        similarity_method = st.selectbox(
+            "Método de Similitud:",
+            ['cosine', 'euclidean', 'dot_product'],
+            format_func=lambda x: {
+                'cosine': 'Similitud Coseno',
+                'euclidean': 'Distancia Euclidiana', 
+                'dot_product': 'Producto Punto'
+            }[x],
+            key="similarity_percentiles_all_metrics_corrected"
+        )
+    
+    cursos_disponibles = ['Todos'] + ordenar_cursos_personalizado(df['curso'].unique().tolist())
+    with col_sel2:
+        curso_seleccionado = st.selectbox(
+            "Filtrar por Curso:", cursos_disponibles,
+            key="sim_percentiles_curso_all_metrics_corrected"
+        )
+    
+    # --- PARÁMETROS ---
+    st.subheader("🎯 Parámetros de la Metodología")
+    
+    col_config1, col_config2 = st.columns(2)
+    
+    with col_config1:
+        st.markdown("**📊 Percentil (p)**")
+        percentil = st.slider(
+            "Percentil p:", 
+            min_value=0, max_value=100, value=80, step=1,
+            help="Conserva solo el top (100-p)% de las comparaciones más similares entre keywords",
+            key="percentil_slider_all_metrics_corrected"
+        )
+        st.info(f"**p = {percentil}%**")
+    
+    with col_config2:
+        st.markdown("**🎯 Umbral (r)**")
+        if similarity_method == 'euclidean':
+            threshold = st.slider(
+                "Umbral r:", 
+                min_value=0.0, max_value=2.0, value=1.0, step=0.01,
+                help="Capítulos relacionados si distancia promedio ≤ r",
+                key="threshold_slider_all_metrics_corrected"
+            )
+        else:
+            threshold = st.slider(
+                "Umbral r:", 
+                min_value=0.0, max_value=1.0, value=0.5, step=0.01,
+                help="Capítulos relacionados si similitud promedio ≥ r",
+                key="threshold_slider_all_metrics_corrected"
+            )
+        st.info(f"**r = {threshold:.2f}**")
+    
+    # --- FUNCIONES OPTIMIZADAS CORREGIDAS ---
+    def crear_capitulo_id(row):
+        """Crear identificador único de capítulo"""
+        curso_abbr = str(row['curso']).replace('Primero', '1B').replace('Segundo', '2B')\
+                                    .replace('Tercero', '3B').replace('Cuarto', '4B')\
+                                    .replace('Quinto', '5B').replace('Sexto', '6B')
+        return f"{curso_abbr}: Capítulo N°{row['numero']}: {row['titulo']}"
+    
+    def cargar_todas_metricas_precomputadas():
+        """Cargar TODAS las métricas precomputadas desde archivo"""
+        try:
+            df_metrics = pd.read_csv("data/precomputed_all_keyword_metrics.csv")
+            
+            # Validar que el archivo tiene las columnas esperadas
+            required_columns = ['capitulo_i', 'capitulo_j', 'cosine_similarities', 'euclidean_distances', 'dot_products']
+            missing_columns = [col for col in required_columns if col not in df_metrics.columns]
+            if missing_columns:
+                st.error(f"❌ El archivo precomputado no tiene las columnas requeridas: {missing_columns}")
+                return None
+            
+            # Convertir las columnas de métricas de string a lista
+            def parse_metricas(metric_str):
+                if isinstance(metric_str, str):
+                    try:
+                        # Manejar diferentes formatos de lista
+                        metric_str = metric_str.strip()
+                        if metric_str.startswith('[') and metric_str.endswith(']'):
+                            metric_str = metric_str[1:-1]
+                        # Filtrar valores vacíos y convertir a float
+                        values = [float(x.strip()) for x in metric_str.split(',') if x.strip() and x.strip() != '...']
+                        return values
+                    except Exception as e:
+                        st.warning(f"⚠️ Error parseando métricas: {e}")
+                        return []
+                return metric_str if isinstance(metric_str, list) else []
+            
+            df_metrics['cosine_similarities'] = df_metrics['cosine_similarities'].apply(parse_metricas)
+            df_metrics['euclidean_distances'] = df_metrics['euclidean_distances'].apply(parse_metricas)
+            df_metrics['dot_products'] = df_metrics['dot_products'].apply(parse_metricas)
+            
+            # CORRECCIÓN: Filtrar filas con métricas válidas (usar & con paréntesis)
+            df_metrics = df_metrics[
+                (df_metrics['cosine_similarities'].apply(len) > 0) & 
+                (df_metrics['euclidean_distances'].apply(len) > 0) & 
+                (df_metrics['dot_products'].apply(len) > 0)
+            ]
+            
+            # Mostrar estadísticas de carga
+            st.write(f"📊 Métricas cargadas: {len(df_metrics)} pares válidos")
+            if len(df_metrics) > 0:
+                sample_row = df_metrics.iloc[0]
+                st.write(f"🔍 Ejemplo - Cosine: {len(sample_row['cosine_similarities'])} valores")
+                st.write(f"🔍 Ejemplo - Euclidean: {len(sample_row['euclidean_distances'])} valores")
+                st.write(f"🔍 Ejemplo - Dot: {len(sample_row['dot_products'])} valores")
+            
+            return df_metrics
+        except FileNotFoundError:
+            st.error("❌ No se encontró el archivo de métricas precomputadas.")
+            st.info("💡 Ejecuta primero: `python precompute_all_keyword_similarities.py`")
+            return None
+        except Exception as e:
+            st.error(f"❌ Error cargando métricas precomputadas: {e}")
+            import traceback
+            st.write("Detalles del error:")
+            st.code(traceback.format_exc())
+            return None
+    
+    def calcular_promedio_filtrado(metricas_ordenadas, percentil, method='cosine'):
+        """
+        Calcular promedio filtrado aplicando percentil a vector ordenado
+        según el método específico
+        """
+        if not metricas_ordenadas or len(metricas_ordenadas) == 0:
+            return 0.0, 0
+        
+        # CORRECCIÓN: Calcular índice de corte para el percentil (usar 100.0 para división float)
+        n = len(metricas_ordenadas)
+        indice_corte = max(1, int(n * (100 - percentil) / 100.0))
+        
+        if method == 'euclidean':
+            # Para distancias: tomar las primeras (menores distancias) - ya están ordenadas de menor a mayor
+            metricas_filtradas = metricas_ordenadas[:indice_corte]
+        else:
+            # Para similitudes: tomar las primeras (mayores valores) - ya están ordenadas de mayor a menor
+            metricas_filtradas = metricas_ordenadas[:indice_corte]
+        
+        if len(metricas_filtradas) > 0:
+            promedio = np.mean(metricas_filtradas)
+            return promedio, len(metricas_filtradas)
+        else:
+            return 0.0, 0
+    
+    def obtener_metricas_por_metodo(df_metrics, method):
+        """Obtener la columna correcta de métricas según el método seleccionado"""
+        if method == 'cosine':
+            return 'cosine_similarities'
+        elif method == 'euclidean':
+            return 'euclidean_distances'
+        elif method == 'dot_product':
+            return 'dot_products'
+        else:
+            return 'cosine_similarities'  # Default
+    
+    # --- PROCESAMIENTO PRINCIPAL ---
+    df_filtrado = df if curso_seleccionado == 'Todos' else df[df['curso'] == curso_seleccionado]
+    if len(df_filtrado) == 0:
+        st.warning("No hay datos para mostrar con los filtros seleccionados.")
+        return
+    
+    df_unique = df_filtrado.drop_duplicates(subset=['id']).copy()
+    df_unique['capitulo_id'] = df_unique.apply(crear_capitulo_id, axis=1)
+    
+    labels = df_unique['capitulo_id'].tolist()
+    courses = df_unique['curso'].tolist()
+    
+    # Cargar TODAS las métricas precomputadas
+    with st.spinner("Cargando todas las métricas precomputadas..."):
+        df_metrics = cargar_todas_metricas_precomputadas()
+    
+    if df_metrics is None or len(df_metrics) == 0:
+        st.error("No se pudieron cargar las métricas precomputadas o están vacías.")
+        return
+    
+    st.success(f"✅ Métricas precomputadas cargadas: {len(df_metrics)} pares de capítulos")
+    
+    # Filtrar métricas por curso seleccionado
+    if curso_seleccionado != 'Todos':
+        capitulos_filtrados = set(df_unique['id'].astype(int))
+        
+        df_metrics_filtrado = df_metrics[
+            (df_metrics['capitulo_i'].astype(int).isin(capitulos_filtrados)) & 
+            (df_metrics['capitulo_j'].astype(int).isin(capitulos_filtrados))
+        ].copy()
+    else:
+        df_metrics_filtrado = df_metrics.copy()
+    
+    st.info(f"📊 Después del filtrado: {len(df_metrics_filtrado)} pares")
+    
+    if len(df_metrics_filtrado) == 0:
+        st.warning("No hay pares de capítulos que coincidan con el filtro seleccionado.")
+        return
+    
+    # Obtener columna de métricas según método seleccionado
+    columna_metricas = obtener_metricas_por_metodo(df_metrics, similarity_method)
+    
+    # Calcular matriz aplicando percentil
+    st.subheader(f"🧮 Aplicando Percentil a Métricas {similarity_method}")
+    
+    n_capitulos = len(df_unique)
+    similarity_matrix = np.zeros((n_capitulos, n_capitulos))
+    
+    # Mapeo de ID de capítulo a índice
+    id_to_idx = {}
+    for idx, (_, row) in enumerate(df_unique.iterrows()):
+        id_to_idx[int(row['id'])] = idx
+    
+    # Verificar mapeo
+    st.write(f"🔍 Mapeo creado: {len(id_to_idx)} capítulos únicos")
+    
+    # Aplicar percentil a cada par
+    progress_bar = st.progress(0)
+    total_pares = len(df_metrics_filtrado)
+    
+    pares_procesados = 0
+    pares_con_error = 0
+    errores_detallados = []
+    
+    for idx, row in enumerate(df_metrics_filtrado.itertuples()):
+        try:
+            cap_id_i = int(row.capitulo_i)
+            cap_id_j = int(row.capitulo_j)
+            
+            # Verificar que ambos IDs existen en el mapeo
+            if cap_id_i not in id_to_idx or cap_id_j not in id_to_idx:
+                pares_con_error += 1
+                errores_detallados.append(f"ID no encontrado: {cap_id_i}-{cap_id_j}")
+                continue
+                
+            metricas_ordenadas = getattr(row, columna_metricas)
+            
+            # Validar que las métricas no estén vacías
+            if not metricas_ordenadas or len(metricas_ordenadas) == 0:
+                pares_con_error += 1
+                errores_detallados.append(f"Métricas vacías: {cap_id_i}-{cap_id_j}")
+                continue
+            
+            idx_i = id_to_idx[cap_id_i]
+            idx_j = id_to_idx[cap_id_j]
+            
+            # Calcular promedio filtrado
+            promedio_filtrado, keywords_consideradas = calcular_promedio_filtrado(
+                metricas_ordenadas, percentil, similarity_method
+            )
+            
+            similarity_matrix[idx_i, idx_j] = promedio_filtrado
+            similarity_matrix[idx_j, idx_i] = promedio_filtrado
+            
+            pares_procesados += 1
+            
+            if pares_procesados % max(1, total_pares // 10) == 0:
+                progress_bar.progress(min(1.0, pares_procesados / total_pares))
+                
+        except Exception as e:
+            pares_con_error += 1
+            errores_detallados.append(f"Error procesando {cap_id_i}-{cap_id_j}: {str(e)}")
+            continue
+    
+    progress_bar.empty()
+    
+    if pares_con_error > 0:
+        st.warning(f"⚠️ {pares_con_error} pares tuvieron problemas")
+        with st.expander("Ver detalles de errores"):
+            for error in errores_detallados[:10]:  # Mostrar solo primeros 10
+                st.write(f"• {error}")
+    
+    st.success(f"✅ {pares_procesados} pares procesados correctamente")
+    
+    # Completar diagonal según método
+    for i in range(n_capitulos):
+        if similarity_method == 'euclidean':
+            similarity_matrix[i, i] = 0.0  # Distancia a sí mismo = 0
+        else:
+            similarity_matrix[i, i] = 1.0  # Similitud consigo mismo = 1
+    
+    # --- RESULTADOS ---
+    st.subheader("📊 Resultados Finales")
+    
+    # Aplicar umbral (CORRECCIÓN: manejar euclidean correctamente)
+    if similarity_method == 'euclidean':
+        # Para distancias: valores más bajos = más similares
+        adjacency_matrix = (similarity_matrix <= threshold).astype(int)
+    else:
+        # Para similitudes: valores más altos = más similares  
+        adjacency_matrix = (similarity_matrix >= threshold).astype(int)
+    
+    np.fill_diagonal(adjacency_matrix, 0)
+    
+    # Estadísticas
+    total_possible = n_capitulos * (n_capitulos - 1) // 2
+    actual_connections = np.sum(adjacency_matrix) // 2
+    
+    col_stats1, col_stats2, col_stats3, col_stats4 = st.columns(4)
+    with col_stats1:
+        st.metric("Conexiones", actual_connections)
+    with col_stats2:
+        porcentaje = (actual_connections / total_possible * 100) if total_possible > 0 else 0
+        st.metric("Porcentaje", f"{porcentaje:.1f}%")
+    with col_stats3:
+        densidad = actual_connections / total_possible if total_possible > 0 else 0
+        st.metric("Densidad", f"{densidad:.4f}")
+    with col_stats4:
+        # Comparación con método tradicional (opcional)
+        try:
+            embeddings_matrix_trad = np.vstack(df_unique['embeddings_array'].values)
+            similarity_trad = calculate_similarity_matrix(embeddings_matrix_trad, similarity_method)
+            if similarity_method == 'euclidean':
+                adj_trad = (similarity_trad <= threshold).astype(int)
+            else:
+                adj_trad = (similarity_trad >= threshold).astype(int)
+            np.fill_diagonal(adj_trad, 0)
+            conexiones_trad = np.sum(adj_trad) // 2
+            diferencia = actual_connections - conexiones_trad
+            st.metric("Δ vs Tradicional", f"{diferencia:+d}")
+        except:
+            st.metric("Δ vs Tradicional", "N/A")
+    
+    
+    # --- VISUALIZACIONES ---  
+    st.subheader(f"🔥 Matriz {similarity_method} Filtrada")
+    title_sim = f"S_ij^(p) - {similarity_method} - p={percentil}%"
+    fig_sim = create_similarity_heatmap(similarity_matrix, labels, title_sim, similarity_method)
+    if fig_sim:
+        st.plotly_chart(fig_sim, use_container_width=True)
+    
+
+    st.subheader("🎯 Matriz de Adyacencia")
+    title_adj = f"Adyacencia - {similarity_method} - p={percentil}%, r={threshold:.2f}"
+    fig_adj = create_similarity_heatmap(adjacency_matrix, labels, title_adj, 'binary')
+    if fig_adj:
+        st.plotly_chart(fig_adj, use_container_width=True)
+    
+    # --- ANÁLISIS DETALLADO ---
+    st.subheader("🔍 Análisis Detallado")
+
+    # Crear lista de conexiones
+    connections_list = []
+    for i in range(n_capitulos):
+        for j in range(i + 1, n_capitulos):
+            if adjacency_matrix[i, j] == 1:
+                # Buscar información del par en las métricas precomputadas
+                cap_id_i = df_unique.iloc[i]['id']
+                cap_id_j = df_unique.iloc[j]['id']
+                
+                # Buscar el par en las métricas precomputadas
+                par_info = None
+                for row in df_metrics_filtrado.itertuples():
+                    if (int(row.capitulo_i) == cap_id_i and int(row.capitulo_j) == cap_id_j) or \
+                    (int(row.capitulo_i) == cap_id_j and int(row.capitulo_j) == cap_id_i):
+                        par_info = row
+                        break
+                
+                if par_info:
+                    # Calcular porcentaje filtrado basado en el percentil aplicado
+                    metricas_ordenadas = getattr(par_info, columna_metricas)
+                    n_total = len(metricas_ordenadas)
+                    indice_corte = max(1, int(n_total * (100 - percentil) / 100))
+                    n_consideradas = indice_corte
+                    porcentaje_filtrado = (n_consideradas / n_total * 100) if n_total > 0 else 0
+                    
+                    connections_list.append({
+                        'curso_1': courses[i],
+                        'capitulo_1': labels[i],
+                        'curso_2': courses[j],
+                        'capitulo_2': labels[j],
+                        'similitud_filtrada': similarity_matrix[i, j],
+                        'keywords_consideradas': n_consideradas,
+                        'keywords_totales': n_total,
+                        'porcentaje_filtrado': f"{porcentaje_filtrado:.1f}%",
+                        'num_keywords_i': par_info.num_keywords_i,
+                        'num_keywords_j': par_info.num_keywords_j
+                    })
+                else:
+                    # Si no encontramos información del par, usar valores por defecto
+                    connections_list.append({
+                        'curso_1': courses[i],
+                        'capitulo_1': labels[i],
+                        'curso_2': courses[j],
+                        'capitulo_2': labels[j],
+                        'similitud_filtrada': similarity_matrix[i, j],
+                        'keywords_consideradas': 'N/A',
+                        'keywords_totales': 'N/A',
+                        'porcentaje_filtrado': 'N/A',
+                        'num_keywords_i': 'N/A',
+                        'num_keywords_j': 'N/A'
+                    })
+
+    if connections_list:
+        connections_df = pd.DataFrame(connections_list)
+        
+        # Estadísticas de similitudes (solo valores numéricos)
+        sim_values_numeric = [conn['similitud_filtrada'] for conn in connections_list if isinstance(conn['similitud_filtrada'], (int, float))]
+        
+        if sim_values_numeric:
+            col_sim1, col_sim2, col_sim3, col_sim4 = st.columns(4)
+            with col_sim1:
+                st.metric("Media S_ij", f"{np.mean(sim_values_numeric):.4f}")
+            with col_sim2:
+                st.metric("Mediana S_ij", f"{np.median(sim_values_numeric):.4f}")
+            with col_sim3:
+                st.metric("Desv. S_ij", f"{np.std(sim_values_numeric):.4f}")
+            with col_sim4:
+                st.metric("Rango S_ij", f"{np.ptp(sim_values_numeric):.4f}")
+        else:
+            st.warning("No hay valores numéricos para calcular estadísticas")
+        
+        # Mostrar estadísticas adicionales de keywords
+        st.subheader("📊 Estadísticas de Keywords")
+        
+        # Calcular estadísticas de keywords consideradas (solo para pares con información)
+        pares_con_info = [conn for conn in connections_list if conn['keywords_totales'] != 'N/A']
+        
+        if pares_con_info:
+            total_keywords_consideradas = sum([conn['keywords_consideradas'] for conn in pares_con_info])
+            total_keywords_totales = sum([conn['keywords_totales'] for conn in pares_con_info])
+            porcentaje_promedio_filtrado = (total_keywords_consideradas / total_keywords_totales * 100) if total_keywords_totales > 0 else 0
+            
+            col_kw1, col_kw2, col_kw3 = st.columns(3)
+            with col_kw1:
+                st.metric("Keywords Consideradas", f"{total_keywords_consideradas:,}")
+            with col_kw2:
+                st.metric("Keywords Totales", f"{total_keywords_totales:,}")
+            with col_kw3:
+                st.metric("% Filtrado Promedio", f"{porcentaje_promedio_filtrado:.1f}%")
+        
+        # Mostrar conexiones
+        st.subheader("🔗 Conexiones Identificadas")
+        st.write(f"**Total de conexiones encontradas: {len(connections_list)}**")
+        
+        # Crear DataFrame para mostrar (columnas seleccionadas)
+        display_columns = ['curso_1', 'capitulo_1', 'curso_2', 'capitulo_2', 'similitud_filtrada']
+        if any(conn['keywords_consideradas'] != 'N/A' for conn in connections_list):
+            display_columns.extend(['keywords_consideradas', 'keywords_totales', 'porcentaje_filtrado'])
+        
+        display_df = connections_df[display_columns].copy()
+        
+        # Renombrar columnas para mejor visualización
+        column_rename = {
+            'curso_1': 'Curso 1',
+            'capitulo_1': 'Capítulo 1', 
+            'curso_2': 'Curso 2',
+            'capitulo_2': 'Capítulo 2',
+            'similitud_filtrada': 'Similitud Filtrada',
+            'keywords_consideradas': 'Keywords Consideradas',
+            'keywords_totales': 'Keywords Totales',
+            'porcentaje_filtrado': '% Filtrado'
+        }
+        display_df = display_df.rename(columns=column_rename)
+        
+        st.dataframe(display_df.head(10), use_container_width=True)
+        
+        # Histograma de similitudes
+        if sim_values_numeric:
+            fig_hist = px.histogram(
+                x=sim_values_numeric,
+                title=f"Distribución de S_ij^(p) - p={percentil}%",
+                labels={'x': 'Similitud Promedio Filtrada', 'y': 'Frecuencia'},
+                nbins=20,
+                color_discrete_sequence=['#1f77b4']
+            )
+            fig_hist.add_vline(x=threshold, line_dash="dash", line_color="red", 
+                            annotation_text=f"Umbral r={threshold:.2f}")
+            
+            # Agregar estadísticas al gráfico
+            fig_hist.add_annotation(
+                x=0.05, y=0.95,
+                xref="paper", yref="paper",
+                text=f"Media: {np.mean(sim_values_numeric):.3f}<br>Mediana: {np.median(sim_values_numeric):.3f}",
+                showarrow=False,
+                bgcolor="white",
+                bordercolor="black",
+                borderwidth=1
+            )
+            
+            st.plotly_chart(fig_hist, use_container_width=True)
+        
+        # --- ANÁLISIS ADICIONAL: CONEXIONES POR CURSO ---
+        st.subheader("📚 Distribución por Curso")
+        
+        # Contar conexiones por curso
+        curso_conteo = {}
+        for conn in connections_list:
+            curso1 = conn['curso_1']
+            curso2 = conn['curso_2']
+            
+            curso_conteo[curso1] = curso_conteo.get(curso1, 0) + 1
+            curso_conteo[curso2] = curso_conteo.get(curso2, 0) + 1
+        
+        if curso_conteo:
+            df_curso_conteo = pd.DataFrame({
+                'Curso': list(curso_conteo.keys()),
+                'Conexiones': list(curso_conteo.values())
+            }).sort_values('Conexiones', ascending=False)
+            
+            fig_cursos = px.bar(
+                df_curso_conteo,
+                x='Curso',
+                y='Conexiones',
+                title="Conexiones por Curso",
+                color='Conexiones',
+                color_continuous_scale='viridis'
+            )
+            st.plotly_chart(fig_cursos, use_container_width=True)
+        
+        # --- TIPOS DE CONEXIÓN ---
+        st.subheader("🔀 Tipos de Conexión")
+        
+        intra_curso = len([conn for conn in connections_list if conn['curso_1'] == conn['curso_2']])
+        inter_curso = len(connections_list) - intra_curso
+        
+        col_tipo1, col_tipo2 = st.columns(2)
+        with col_tipo1:
+            fig_tipo = px.pie(
+                values=[intra_curso, inter_curso],
+                names=['Intra-curso', 'Inter-curso'],
+                title="Distribución de Tipos de Conexión",
+                color=['Intra-curso', 'Inter-curso'],
+                color_discrete_map={'Intra-curso': '#FF6B6B', 'Inter-curso': '#4ECDC4'}
+            )
+            st.plotly_chart(fig_tipo, use_container_width=True)
+        
+        with col_tipo2:
+            st.metric("Conexiones Intra-curso", intra_curso)
+            st.metric("Conexiones Inter-curso", inter_curso)
+            st.metric("Proporción Intra/Inter", f"{(intra_curso/max(inter_curso,1)):.2f}")
+        
+        # --- DESCARGAS ---
+        st.subheader("📥 Descargar Resultados")
+        
+        col_dl1, col_dl2, col_dl3 = st.columns(3)
+        
+        with col_dl1:
+            matrix_df = pd.DataFrame(similarity_matrix, index=labels, columns=labels)
+            csv_matrix = matrix_df.to_csv()
+            st.download_button(
+                label="💾 Matriz S_ij^(p)",
+                data=csv_matrix,
+                file_name=f"matriz_similitud_filtrada_p{percentil}.csv",
+                mime="text/csv"
+            )
+        
+        with col_dl2:
+            adj_df = pd.DataFrame(adjacency_matrix, index=labels, columns=labels)
+            csv_adj = adj_df.to_csv()
+            st.download_button(
+                label="🎯 Matriz Adyacencia",
+                data=csv_adj,
+                file_name=f"matriz_adyacencia_p{percentil}_r{threshold:.2f}.csv",
+                mime="text/csv"
+            )
+        
+        with col_dl3:
+            csv_conn = connections_df.to_csv(index=False)
+            st.download_button(
+                label="📊 Lista Conexiones",
+                data=csv_conn,
+                file_name=f"conexiones_p{percentil}_r{threshold:.2f}.csv",
+                mime="text/csv"
+            )
+    else:
+        st.warning("No se encontraron conexiones con los parámetros actuales.")
 
 def debug_string(label, value):
     try:
@@ -2732,7 +3912,7 @@ def main():
     st.markdown("Herramientas de análisis y visualización para contenido educativo")
     
     # Sistema de pestañas
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Embeddings", "🔥 Similitud", "🧱 Umbrales de Similitud", "🎯 Percentiles", "🔍 Búsqueda Semántica"])
+    tab1, tab2, tab3, tab4, tab6, tab5 = st.tabs(["📊 Embeddings", "🔥 Similitud", "🧱 Umbrales de Similitud", "🎯 Percentiles", "🧮 Percentiles Keywords","🔍 Búsqueda Semántica"])
     
     with tab1:
         embeddings_tab()
@@ -2745,6 +3925,10 @@ def main():
     
     with tab4:
         similarity_heatmaps_tab_with_percentiles()
+    
+    with tab6:
+        #similarity_heatmaps_tab_with_percentiles_keywords_dataframe_esp()
+        similarity_heatmaps_tab_with_percentiles_keywords()
 
     with tab5:
         semantic_search_tab()
