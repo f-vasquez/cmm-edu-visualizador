@@ -197,7 +197,7 @@ def embeddings_tab():
     )
     fig.update_layout(xaxis_title="Dimensión 1", yaxis_title="Dimensión 2", showlegend=True, hovermode='closest')
     fig.update_traces(textposition="middle right", textfont_size=8, marker=dict(size=10, opacity=0.7))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="embeddings_tab_main_plot")
     st.subheader("📋 Datos Detallados")
     st.dataframe(
         df_filtrado[['curso', 'numero', 'titulo', 'keywords', 'etiqueta']].rename(columns={
@@ -609,7 +609,7 @@ def similarity_heatmaps_tab():
         )
         
         if fig_matrix is not None:
-            st.plotly_chart(fig_matrix, use_container_width=True)
+            st.plotly_chart(fig_matrix, use_container_width=True, key="similarity_tab_matrix")
         else:
             st.error("Error: create_similarity_heatmap devolvió None")
             
@@ -659,7 +659,7 @@ def similarity_heatmaps_tab():
             xaxis_title=f'{"Distancia" if similarity_method == "euclidean" else "Similitud"} Promedio',
             yaxis_title="Capítulos"
         )
-        st.plotly_chart(fig_avg, use_container_width=True)
+        st.plotly_chart(fig_avg, use_container_width=True, key="similarity_tab_avg")
         st.write(f"Debug: Se creó gráfico con {len(df_avg)} capítulos")
         
     except Exception as e:
@@ -728,7 +728,7 @@ def similarity_heatmaps_tab():
                 title="Número de Keywords vs Diversidad Léxica",
                 labels={'num_keywords': 'Número de Keywords', 'lexical_diversity': 'Diversidad Léxica'}
             )
-            st.plotly_chart(fig_keywords, use_container_width=True)
+            st.plotly_chart(fig_keywords, use_container_width=True, key="fig_keywords_1")
         
         with col2:
             fig_length = px.box(
@@ -739,7 +739,7 @@ def similarity_heatmaps_tab():
                 labels={'avg_keyword_length': 'Longitud Promedio Keywords'}
             )
             fig_length.update_layout(xaxis=dict(tickangle=45))
-            st.plotly_chart(fig_length, use_container_width=True)
+            st.plotly_chart(fig_length, use_container_width=True, key="fig_length_1")
     
     with tab_intra2:
         # Gráficos de métricas de embeddings
@@ -755,7 +755,7 @@ def similarity_heatmaps_tab():
                 title="Magnitud vs Varianza de Embeddings",
                 labels={'embedding_magnitude': 'Magnitud del Embedding', 'embedding_variance': 'Varianza del Embedding'}
             )
-            st.plotly_chart(fig_magnitude, use_container_width=True)
+            st.plotly_chart(fig_magnitude, use_container_width=True, key="fig_magnitude_1")
         
         with col2:
             fig_entropy = px.histogram(
@@ -766,7 +766,7 @@ def similarity_heatmaps_tab():
                 labels={'embedding_entropy': 'Entropía del Embedding'},
                 marginal="box"
             )
-            st.plotly_chart(fig_entropy, use_container_width=True)
+            st.plotly_chart(fig_entropy, use_container_width=True, key="fig_entropy_1")
     
     with tab_intra3:
         # Matriz de correlación
@@ -795,7 +795,7 @@ def similarity_heatmaps_tab():
             xaxis=dict(tickangle=45)
         )
         
-        st.plotly_chart(fig_corr, use_container_width=True)
+        st.plotly_chart(fig_corr, use_container_width=True, key="fig_corr_1")
         
         # Tabla de métricas por capítulo
         st.write("**Métricas Detalladas por Capítulo:**")
@@ -1267,7 +1267,7 @@ def similarity_heatmaps_tab_with_threshold():
         )
         
         if fig_adjacency is not None:
-            st.plotly_chart(fig_adjacency, use_container_width=True)
+            st.plotly_chart(fig_adjacency, use_container_width=True, key="fig_adjacency_1")
         else:
             st.error("Error: create_similarity_heatmap devolvió None para la matriz de adyacencia")
             
@@ -1486,7 +1486,7 @@ def similarity_heatmaps_tab_with_threshold():
                     linewidth=1
                 )
                 
-                st.plotly_chart(fig_courses, use_container_width=True)
+                st.plotly_chart(fig_courses, use_container_width=True, key="fig_courses_1")
         
         with col_anal2:
             # Histograma de valores de similitud/distancia - MEJORADO
@@ -1558,7 +1558,7 @@ def similarity_heatmaps_tab_with_threshold():
                     title_font=dict(size=12)
                 )
                 
-                st.plotly_chart(fig_hist, use_container_width=True)
+                st.plotly_chart(fig_hist, use_container_width=True, key="fig_hist_1")
         
         # --- GRÁFICO ADICIONAL: TIPOS DE CONEXIÓN ---
         st.subheader("🔗 Análisis de Tipos de Conexión")
@@ -1602,7 +1602,7 @@ def similarity_heatmaps_tab_with_threshold():
                     height=350
                 )
                 
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.plotly_chart(fig_pie, use_container_width=True, key="fig_pie_1")
         
         with col_anal4:
             if len(connections_list) > 0:
@@ -1650,7 +1650,7 @@ def similarity_heatmaps_tab_with_threshold():
                     height=400
                 )
 
-                st.plotly_chart(fig_violin, use_container_width=True)
+                st.plotly_chart(fig_violin, use_container_width=True, key="fig_violin_1")
 
         
         # --- ESTADÍSTICAS RÁPIDAS ---
@@ -1748,7 +1748,7 @@ def similarity_heatmaps_tab_with_threshold():
         )
         
         if fig_matrix is not None:
-            st.plotly_chart(fig_matrix, use_container_width=True)
+            st.plotly_chart(fig_matrix, use_container_width=True, key="capitulo_id_similarity_tab_matrix")
         else:
             st.error("Error: create_similarity_heatmap devolvió None")
             
@@ -1798,7 +1798,7 @@ def similarity_heatmaps_tab_with_threshold():
             xaxis_title=f'{"Distancia" if similarity_method == "euclidean" else "Similitud"} Promedio',
             yaxis_title="Capítulos"
         )
-        st.plotly_chart(fig_avg, use_container_width=True)
+        st.plotly_chart(fig_avg, use_container_width=True, key="capitulo_id_similarity_tab_avg")
         st.write(f"Debug: Se creó gráfico con {len(df_avg)} capítulos")
         
     except Exception as e:
@@ -2123,7 +2123,7 @@ def similarity_heatmaps_tab_with_percentiles():
     
     try:
         fig_adjacency = create_similarity_heatmap(adjacency_matrix, labels, titulo, 'binary')
-        if fig_adjacency: st.plotly_chart(fig_adjacency, use_container_width=True)
+        if fig_adjacency: st.plotly_chart(fig_adjacency, use_container_width=True, key="fig_adjacency_2")
     except Exception as e:
         st.error(f"Error creando matriz de adyacencia: {str(e)}")
     
@@ -2239,7 +2239,7 @@ def similarity_heatmaps_tab_with_percentiles():
                 fig_courses.update_layout(xaxis_tickangle=45, plot_bgcolor='rgba(248,249,250,1)',
                                         paper_bgcolor='rgba(248,249,250,1)', showlegend=False, height=400)
                 fig_courses.update_traces(textposition='outside', marker_line_color='black', marker_line_width=1)
-                st.plotly_chart(fig_courses, use_container_width=True)
+                st.plotly_chart(fig_courses, use_container_width=True, key="fig_courses_2")
                 
                 if filtrar_mayor_grado:
                     st.info(f"**Conexiones con mayor grado:** {len(connections_list_filtrada)} de {len(connections_list)} totales ({(len(connections_list_filtrada)/len(connections_list)*100):.1f}%)")
@@ -2265,7 +2265,7 @@ def similarity_heatmaps_tab_with_percentiles():
                 
                 fig_hist.update_layout(plot_bgcolor='rgba(248,249,250,1)', paper_bgcolor='rgba(248,249,250,1)',
                                      height=400, showlegend=False)
-                st.plotly_chart(fig_hist, use_container_width=True)
+                st.plotly_chart(fig_hist, use_container_width=True, key="fig_hist_2")
         
         # --- ANÁLISIS DE TIPOS DE CONEXIÓN ---
         st.subheader("🔗 Análisis de Tipos de Conexión")
@@ -2286,7 +2286,7 @@ def similarity_heatmaps_tab_with_percentiles():
                 fig_pie.update_layout(plot_bgcolor='rgba(248,249,250,1)', paper_bgcolor='rgba(248,249,250,1)',
                                     height=350, showlegend=True,
                                     legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.plotly_chart(fig_pie, use_container_width=True, key="fig_pie_2")
         
         with col_anal4:
             # Violin plot
@@ -2311,7 +2311,7 @@ def similarity_heatmaps_tab_with_percentiles():
                 
                 fig_violin.update_layout(plot_bgcolor='rgba(248,249,250,1)', paper_bgcolor='rgba(248,249,250,1)',
                                        height=350, showlegend=False)
-                st.plotly_chart(fig_violin, use_container_width=True)
+                st.plotly_chart(fig_violin, use_container_width=True, key="fig_violin_2")
         
         # --- ESTADÍSTICAS RÁPIDAS ---
         st.subheader("📈 Estadísticas Rápidas")
@@ -2337,7 +2337,7 @@ def similarity_heatmaps_tab_with_percentiles():
         fig_matrix = create_similarity_heatmap(similarity_matrix, labels, 
                                              f"Matriz de Similitud Completa ({method_names[similarity_method]})", 
                                              similarity_method)
-        if fig_matrix: st.plotly_chart(fig_matrix, use_container_width=True)
+        if fig_matrix: st.plotly_chart(fig_matrix, use_container_width=True, key="fig_matrix_1")
     except Exception as e:
         st.error(f"Error creando matriz de similitud completa: {str(e)}")
     
@@ -2469,30 +2469,30 @@ def similarity_heatmaps_tab_with_percentiles_keywords():
                 else:
                     # Para capítulos diferentes, aplicar filtrado por percentil
                     
-                    # 1. Obtener solo la parte triangular superior sin diagonal
-                    if J_i == 1 and J_j == 1:
-                        # Caso especial: solo una keyword en cada capítulo
-                        sim_vals = S_ij.flatten()
-                    else:
-                        # Crear máscara para triangular superior
-                        mask = np.triu(np.ones((J_i, J_j), k=1), k=1).astype(bool)
-                        sim_vals = S_ij[mask]
+                    # 1. Extraer valores para calcular el percentil
+                    # Según especificación: considerar toda la matriz S_ij (ya que i≠j)
+                    sim_vals = S_ij.flatten()
                     
                     if len(sim_vals) > 0:
-                        # 2. Calcular percentil según el método
+                        # 2. Calcular umbral τ_p(i,j) = percentil(S_ij, p)
                         if method == "euclidean":
-                            # Para distancias, percentil inferior (distancias más pequeñas = más similares)
-                            tau_p = np.percentile(sim_vals, percentil)
+                            # Para distancias euclidianas: percentil inferior
+                            # (conservar distancias pequeñas = más similares)
+                            tau_p = np.percentile(sim_vals, 100 - percentil)
+                            # Máscara binaria: B_ij = [S_ij <= τ_p]
                             mask_filtro = S_ij <= tau_p
                         else:
-                            # Para similitudes, percentil superior (similitudes más altas)
-                            tau_p = np.percentile(sim_vals, 100 - percentil)
+                            # Para similitudes (cosine, dot_product): percentil superior
+                            # (conservar similitudes altas)
+                            tau_p = np.percentile(sim_vals, percentil)
+                            # Máscara binaria: B_ij = [S_ij >= τ_p]
                             mask_filtro = S_ij >= tau_p
                         
-                        # 3. Aplicar máscara binaria (producto de Hadamard)
+                        # 3. Aplicar filtrado: S̃_ij = S_ij ⊙ B_ij (producto de Hadamard)
                         S_ij_filtrado = S_ij * mask_filtro
                         
-                        # 4. Calcular promedio solo sobre valores no cero
+                        # 4. Calcular promedio: S̄_ij = Σ(S̃_ij) / ||B_ij||_0
+                        # Solo sobre valores que cumplen la condición (B_ij = 1)
                         valores_no_cero = S_ij_filtrado[mask_filtro]
                         if len(valores_no_cero) > 0:
                             promedio = np.mean(valores_no_cero)
@@ -2696,7 +2696,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords():
     
     try:
         fig_adjacency = create_similarity_heatmap(adjacency_matrix, labels, titulo, 'binary')
-        if fig_adjacency: st.plotly_chart(fig_adjacency, use_container_width=True)
+        if fig_adjacency: st.plotly_chart(fig_adjacency, use_container_width=True, key="fig_adjacency_3")
     except Exception as e:
         st.error(f"Error creando matriz de adyacencia: {str(e)}")
     
@@ -2809,7 +2809,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords():
                 fig_courses.update_layout(xaxis_tickangle=45, plot_bgcolor='rgba(248,249,250,1)',
                                         paper_bgcolor='rgba(248,249,250,1)', showlegend=False, height=400)
                 fig_courses.update_traces(textposition='outside', marker_line_color='black', marker_line_width=1)
-                st.plotly_chart(fig_courses, use_container_width=True)
+                st.plotly_chart(fig_courses, use_container_width=True, key="fig_courses_3")
                 
                 if filtrar_mayor_grado:
                     st.info(f"**Conexiones con mayor grado:** {len(connections_list_filtrada)} de {len(connections_list)} totales ({(len(connections_list_filtrada)/len(connections_list)*100):.1f}%)")
@@ -2831,7 +2831,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords():
                 
                 fig_hist.update_layout(plot_bgcolor='rgba(248,249,250,1)', paper_bgcolor='rgba(248,249,250,1)',
                                      height=400, showlegend=False)
-                st.plotly_chart(fig_hist, use_container_width=True)
+                st.plotly_chart(fig_hist, use_container_width=True, key="fig_hist_3")
         
         # --- ANÁLISIS DE TIPOS DE CONEXIÓN ---
         st.subheader("🔗 Análisis de Tipos de Conexión")
@@ -2852,7 +2852,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords():
                 fig_pie.update_layout(plot_bgcolor='rgba(248,249,250,1)', paper_bgcolor='rgba(248,249,250,1)',
                                     height=350, showlegend=True,
                                     legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.plotly_chart(fig_pie, use_container_width=True, key="fig_pie_3")
         
         with col_anal4:
             # Violin plot
@@ -2873,7 +2873,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords():
                 
                 fig_violin.update_layout(plot_bgcolor='rgba(248,249,250,1)', paper_bgcolor='rgba(248,249,250,1)',
                                        height=350, showlegend=False)
-                st.plotly_chart(fig_violin, use_container_width=True)
+                st.plotly_chart(fig_violin, use_container_width=True, key="fig_violin_3")
         
         # --- ESTADÍSTICAS RÁPIDAS ---
         st.subheader("📈 Estadísticas Rápidas")
@@ -2939,7 +2939,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords():
         fig_matrix = create_similarity_heatmap(similarity_matrix, labels, 
                                              f"Matriz de Similitud Filtrada (p={percentil}%) ({method_names[similarity_method]})", 
                                              similarity_method)
-        if fig_matrix: st.plotly_chart(fig_matrix, use_container_width=True)
+        if fig_matrix: st.plotly_chart(fig_matrix, use_container_width=True, key="fig_matrix_2")
     except Exception as e:
         st.error(f"Error creando matriz de similitud filtrada: {str(e)}")
     
@@ -3324,14 +3324,14 @@ def similarity_heatmaps_tab_with_percentiles_keywords_dataframe_esp():
     title_sim = f"S_ij^(p) - {similarity_method} - p={percentil}%"
     fig_sim = create_similarity_heatmap(similarity_matrix, labels, title_sim, similarity_method)
     if fig_sim:
-        st.plotly_chart(fig_sim, use_container_width=True)
+        st.plotly_chart(fig_sim, use_container_width=True, key="fig_sim_1")
     
 
     st.subheader("🎯 Matriz de Adyacencia")
     title_adj = f"Adyacencia - {similarity_method} - p={percentil}%, r={threshold:.2f}"
     fig_adj = create_similarity_heatmap(adjacency_matrix, labels, title_adj, 'binary')
     if fig_adj:
-        st.plotly_chart(fig_adj, use_container_width=True)
+        st.plotly_chart(fig_adj, use_container_width=True, key="fig_adj_1")
     
     # --- ANÁLISIS DETALLADO ---
     st.subheader("🔍 Análisis Detallado")
@@ -3475,7 +3475,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords_dataframe_esp():
                 borderwidth=1
             )
             
-            st.plotly_chart(fig_hist, use_container_width=True)
+            st.plotly_chart(fig_hist, use_container_width=True, key="fig_hist_4")
         
         # --- ANÁLISIS ADICIONAL: CONEXIONES POR CURSO ---
         st.subheader("📚 Distribución por Curso")
@@ -3503,7 +3503,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords_dataframe_esp():
                 color='Conexiones',
                 color_continuous_scale='viridis'
             )
-            st.plotly_chart(fig_cursos, use_container_width=True)
+            st.plotly_chart(fig_cursos, use_container_width=True, key="fig_cursos_1")
         
         # --- TIPOS DE CONEXIÓN ---
         st.subheader("🔀 Tipos de Conexión")
@@ -3520,7 +3520,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords_dataframe_esp():
                 color=['Intra-curso', 'Inter-curso'],
                 color_discrete_map={'Intra-curso': '#FF6B6B', 'Inter-curso': '#4ECDC4'}
             )
-            st.plotly_chart(fig_tipo, use_container_width=True)
+            st.plotly_chart(fig_tipo, use_container_width=True, key="fig_tipo_1")
         
         with col_tipo2:
             st.metric("Conexiones Intra-curso", intra_curso)
