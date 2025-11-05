@@ -2152,7 +2152,7 @@ def similarity_heatmaps_tab_with_percentiles():
     with col_download1:
         if st.button("💾 Matriz de Adyacencia (CSV)", key="download_adj_btn_percentiles"):
             csv_adj = adj_df.to_csv()
-            file_name = f"matriz_adyacencia_percentil_{percentil if use_percentil else 'no'}_umbral_{umbral_absoluto if use_umbral else 'no'}_{similarity_method}.csv"
+            file_name = f"matriz_adyacencia_{similarity_method}_percentil{percentil if use_percentil else 'no'}_umbral{umbral_absoluto if use_umbral else 'no':.2f}_{safe_filename(curso_seleccionado)}.csv"
             st.download_button("Descargar Matriz CSV", csv_adj, file_name, "text/csv", key="download_adj_matrix_percentiles")
     
     with col_download2:
@@ -2724,7 +2724,7 @@ def similarity_heatmaps_tab_with_percentiles_keywords():
     with col_download1:
         if st.button("💾 Matriz de Adyacencia (CSV)", key="download_adj_btn_keywords"):
             csv_adj = adj_df.to_csv()
-            file_name = f"matriz_adyacencia_keywords_p{percentil}_r{threshold:.2f}_{similarity_method}.csv"
+            file_name = f"matriz_adyacencia_keywords_{similarity_method}_percentil{percentil}_umbral{threshold:.2f}_{safe_filename(curso_seleccionado)}.csv"
             st.download_button("Descargar Matriz CSV", csv_adj, file_name, "text/csv", key="download_adj_matrix_keywords")
     
     with col_download2:
@@ -3914,11 +3914,11 @@ def main():
     # Sistema de pestañas
     tab1, tab2, tab3, tab4, tab6, tab5 = st.tabs(["📊 Embeddings", "🔥 Similitud", "🧱 Umbrales de Similitud", "🎯 Percentiles", "🧮 Percentiles Keywords","🔍 Búsqueda Semántica"])
     
-    with tab1:
-        embeddings_tab()
+    #with tab1:
+        #embeddings_tab()
     
-    with tab2:
-        similarity_heatmaps_tab()
+    #with tab2:
+        #similarity_heatmaps_tab()
     
     with tab3:
         similarity_heatmaps_tab_with_threshold()
